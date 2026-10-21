@@ -180,6 +180,23 @@ docker compose up --build
 
 ---
 
+### 7. Troubleshooting & FAQ
+
+#### Port Already in Use (Conflict)
+If port `8000` or `5173` is occupied by another local service:
+- **Change Backend Port**: Start Uvicorn on another port (e.g. `8080`):
+  ```bash
+  uvicorn app.main:app --reload --port 8080
+  ```
+  *(Remember to update `VITE_API_URL=http://localhost:8080` in your `.env` file)*.
+- **Change Frontend Port**: Start Vite with `--port`:
+  ```bash
+  npm run dev -- --port 3000
+  ```
+  *(Remember to add `http://localhost:3000` to `CORS_ORIGINS` in your `.env` file)*.
+
+---
+
 ## 📖 Documentation Links
 
 - [System Architecture](file:///c:/Users/91630/OneDrive/Desktop/taskflow/docs/architecture.md)
