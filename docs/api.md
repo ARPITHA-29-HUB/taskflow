@@ -1,22 +1,23 @@
 # TaskFlow — API Documentation
 
-This document describes the REST API endpoints provided by the TaskFlow backend.
+This document describes the REST API contract provided by the TaskFlow backend.
 
 - **Base URL (Local)**: `http://localhost:8000`
-- **Interactive OpenAPI Docs**: `http://localhost:8000/docs`
+- **Interactive OpenAPI (Swagger) Docs**: `http://localhost:8000/docs`
 - **ReDoc Alternative Docs**: `http://localhost:8000/redoc`
+- **Content-Type**: `application/json`
+- **Error Content-Type**: `application/problem+json` (RFC 9457)
 
 ---
 
-## 1. Available Endpoints (Day 0)
+## 1. System & Health Endpoints
 
 ### 1.1 Welcome / Root
-Returns basic application information.
+Returns basic application metadata.
 
 - **Method**: `GET`
 - **Path**: `/`
 - **Authentication**: None required
-- **Query Parameters**: None
 
 #### Response (200 OK)
 ```json
@@ -28,12 +29,11 @@ Returns basic application information.
 ---
 
 ### 1.2 Health Check
-Returns service health telemetry and status code.
+Returns service health telemetry, database status, and API version.
 
 - **Method**: `GET`
 - **Path**: `/health`
 - **Authentication**: None required
-- **Query Parameters**: None
 
 #### Response (200 OK)
 ```json
@@ -46,48 +46,305 @@ Returns service health telemetry and status code.
 
 ---
 
-## 2. Planned Endpoints (Day 1 & Day 2 Roadmap)
+## 2. Authentication & Users
 
-### 2.1 Authentication & Users (Day 1)
+### 2.1 Register New User
+Registers a new user account with hashed password storage.
 
-| Method | Endpoint | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/auth/register` | Register new user account | No |
-| `POST` | `/api/v1/auth/login` | Login and receive JWT access token | No |
-| `GET` | `/api/v1/auth/me` | Fetch current authenticated user | Yes (Bearer) |
+- **Method**: `POST`
+- **Path**: `/api/v1/auth/register`
+- **Authentication**: None required
 
----
-
-### 2.2 Task Management (Day 2)
-
-| Method | Endpoint | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/tasks` | List tasks (with pagination & filter) | Yes (Bearer) |
-| `POST` | `/api/v1/tasks` | Create a new task | Yes (Bearer) |
-| `GET` | `/api/v1/tasks/{id}` | Retrieve specific task by ID | Yes (Bearer) |
-| `PUT` | `/api/v1/tasks/{id}` | Update task title, description, or status | Yes (Bearer) |
-| `DELETE` | `/api/v1/tasks/{id}` | Remove a task | Yes (Bearer) |
-
-#### Sample Task Payload (`POST /api/v1/tasks`)
+#### Request Body
 ```json
 {
-  "title": "Design Database Schema",
-  "description": "Create initial User and Task tables using SQLAlchemy",
-  "priority": "high",
-  "due_date": "2026-10-25T18:00:00Z"
+  "email": "user@example.com",
+  "password": "SecurePassword123!"
+}
+```
+
+#### Response (201 Created)
+```json
+{
+  "id": 1,
+  "email": "user@example.com",
+  "is_active": true,
+  "created_at": "2026-10-22T10:00:00Z"
 }
 ```
 
 ---
 
-## 3. Standard HTTP Status Codes
+### 2.2 User Login (Token Generation)
+Authenticates credentials and returns a Bearer JWT.
 
-| Status Code | Description | Usage |
+- **Method**: `POST`
+- **Path**: `/api/v1/auth/login`
+- **Authentication**: None required
+- **Form Data / JSON Body**:
+  ```json
+  {
+    "username": "user@example.com",
+    "password": "SecurePassword123!"
+  }
+  ```
+
+#### Response (200 OK)
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "expires_in": 3600
+}
+```
+
+---
+
+### 2.3 Get Current User Profile
+Retrieves profile information for the authenticated user.
+
+- **Method**: `GET`
+- **Path**: `/api/v1/auth/me`
+- **Authentication**: Bearer JWT (`Authorization: Bearer <token>`)
+
+#### Response (200 OK)
+```json
+{
+  "id": 1,
+  "email": "user@example.com",
+  "is_active": true,
+  "created_at": "2026-10-22T10:00:00Z"
+}
+```
+
+---
+
+## 3. Task Management (User Scoped)
+
+All task endpoints require an authenticated user (`Authorization: Bearer <token>`). Queries are strictly isolated to the authenticated user's tasks.
+
+### 3.1 List Tasks (Paginated & Filtered)
+Retrieves a paginated list of tasks belonging to the authenticated user.
+
+- **Method**: `GET`
+- **Path**: `/api/v1/tasks`
+- **Authentication**: Bearer JWT
+- **Query Parameters**:
+  | Parameter | Type | Default | Description |
+  | :--- | :--- | :--- | :--- |
+  | `limit` | integer | `20` | Max items to return (1 - 100) |
+  | `offset` | integer | `0` | Number of records to skip |
+  | `status` | string | `null` | Filter by status (`todo`, `in_progress`, `done`) |
+  | `priority` | string | `null` | Filter by priority (`low`, `medium`, `high`) |
+  | `search` | string | `null` | Substring match against title or description |
+
+#### Response (200 OK) — Paginated Envelope
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "title": "Design Database Schema",
+      "description": "Create initial User and Task tables using SQLAlchemy",
+      "status": "in_progress",
+      "priority": "high",
+      "due_date": "2026-10-25T18:00:00Z",
+      "created_at": "2026-10-22T10:00:00Z",
+      "updated_at": "2026-10-22T10:30:00Z",
+      "user_id": 1
+    }
+  ],
+  "total": 1,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+---
+
+### 3.2 Create Task
+Creates a new task owned by the authenticated user.
+
+- **Method**: `POST`
+- **Path**: `/api/v1/tasks`
+- **Authentication**: Bearer JWT
+
+#### Request Body
+```json
+{
+  "title": "Write Pytest Suite",
+  "description": "Add unit and integration tests for task endpoints",
+  "status": "todo",
+  "priority": "medium",
+  "due_date": "2026-10-26T12:00:00Z"
+}
+```
+
+#### Response (201 Created)
+```json
+{
+  "id": 2,
+  "title": "Write Pytest Suite",
+  "description": "Add unit and integration tests for task endpoints",
+  "status": "todo",
+  "priority": "medium",
+  "due_date": "2026-10-26T12:00:00Z",
+  "created_at": "2026-10-22T11:00:00Z",
+  "updated_at": "2026-10-22T11:00:00Z",
+  "user_id": 1
+}
+```
+
+---
+
+### 3.3 Get Task by ID
+Retrieves details of a single task.
+
+- **Method**: `GET`
+- **Path**: `/api/v1/tasks/{id}`
+- **Authentication**: Bearer JWT
+
+#### Response (200 OK)
+```json
+{
+  "id": 1,
+  "title": "Design Database Schema",
+  "description": "Create initial User and Task tables using SQLAlchemy",
+  "status": "in_progress",
+  "priority": "high",
+  "due_date": "2026-10-25T18:00:00Z",
+  "created_at": "2026-10-22T10:00:00Z",
+  "updated_at": "2026-10-22T10:30:00Z",
+  "user_id": 1
+}
+```
+
+---
+
+### 3.4 Update Task
+Updates fields on an existing task. Partial updates are supported.
+
+- **Method**: `PUT` (or `PATCH`)
+- **Path**: `/api/v1/tasks/{id}`
+- **Authentication**: Bearer JWT
+
+#### Request Body
+```json
+{
+  "status": "done",
+  "priority": "low"
+}
+```
+
+#### Response (200 OK)
+```json
+{
+  "id": 1,
+  "title": "Design Database Schema",
+  "description": "Create initial User and Task tables using SQLAlchemy",
+  "status": "done",
+  "priority": "low",
+  "due_date": "2026-10-25T18:00:00Z",
+  "created_at": "2026-10-22T10:00:00Z",
+  "updated_at": "2026-10-22T11:15:00Z",
+  "user_id": 1
+}
+```
+
+---
+
+### 3.5 Delete Task
+Permanently deletes a task belonging to the authenticated user.
+
+- **Method**: `DELETE`
+- **Path**: `/api/v1/tasks/{id}`
+- **Authentication**: Bearer JWT
+
+#### Response (204 No Content)
+*Empty response body.*
+
+---
+
+## 4. Error Responses (RFC 9457 — Problem Details)
+
+TaskFlow adheres to the **RFC 9457 standard** (`application/problem+json`) for all non-2xx responses. Every error payload contains a consistent, machine-readable structure:
+
+```json
+{
+  "type": "string (URI referencing problem category)",
+  "title": "string (Short summary of the error type)",
+  "status": "integer (HTTP status code matching the response)",
+  "detail": "string (Human-readable explanation specific to this occurrence)",
+  "instance": "string (URI of the request that caused the error)",
+  "invalid_params": [ "optional list of field-level validation errors" ]
+}
+```
+
+### 4.1 Example: 404 Resource Not Found
+Returned when the requested task ID does not exist or does not belong to the user.
+
+```json
+{
+  "type": "https://taskflow.dev/errors/not-found",
+  "title": "Resource Not Found",
+  "status": 404,
+  "detail": "Task with ID 99 was not found or does not belong to you",
+  "instance": "/api/v1/tasks/99"
+}
+```
+
+---
+
+### 4.2 Example: 401 Unauthorized
+Returned when a request is missing an `Authorization` header or presents an expired/invalid JWT.
+
+```json
+{
+  "type": "https://taskflow.dev/errors/unauthorized",
+  "title": "Unauthorized",
+  "status": 401,
+  "detail": "Invalid or expired access token. Please log in again.",
+  "instance": "/api/v1/tasks"
+}
+```
+
+---
+
+### 4.3 Example: 422 Unprocessable Content (Validation Error)
+Returned when request parameters or payload fail Pydantic schema validation.
+
+```json
+{
+  "type": "https://taskflow.dev/errors/validation-error",
+  "title": "Validation Error",
+  "status": 422,
+  "detail": "The payload failed schema validation",
+  "instance": "/api/v1/tasks",
+  "invalid_params": [
+    {
+      "field": "title",
+      "reason": "String should have at least 1 character"
+    },
+    {
+      "field": "priority",
+      "reason": "Input should be 'low', 'medium', or 'high'"
+    }
+  ]
+}
+```
+
+---
+
+## 5. Standard HTTP Status Codes Summary
+
+| Status Code | Description | Usage in TaskFlow |
 | :--- | :--- | :--- |
-| `200 OK` | Request succeeded | Standard successful GET / PUT |
-| `201 Created` | Resource created | Standard successful POST |
-| `204 No Content`| Action completed without payload | Standard successful DELETE |
-| `400 Bad Request`| Malformed request or validation failure | Client validation error |
-| `401 Unauthorized`| Missing or invalid credentials | Authentication error |
-| `404 Not Found` | Requested resource does not exist | Invalid ID |
-| `500 Internal Error`| Server encountered an error | Unhandled exception |
+| `200 OK` | Request succeeded | `GET`, `PUT` updates returning data |
+| `201 Created` | Resource created | `POST /tasks`, `POST /auth/register` |
+| `204 No Content` | Succeeded with no body | `DELETE /tasks/{id}` |
+| `400 Bad Request` | Client malformed request | Syntax error or unsupported parameters |
+| `401 Unauthorized` | Authentication failure | Missing, invalid, or expired Bearer token |
+| `403 Forbidden` | Authorization failure | Authenticated user lacks permission |
+| `404 Not Found` | Target not found | Task or endpoint does not exist |
+| `422 Unprocessable`| Schema validation error | Invalid field format, length, or enum values |
+| `500 Internal Error`| Unhandled server error | Unexpected runtime exception |

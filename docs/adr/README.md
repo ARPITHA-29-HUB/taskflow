@@ -16,3 +16,5 @@ Each record follows the standard Michael Nygard template:
 ## Index of Records
 - [ADR 0001: Record Architecture Decisions](file:///c:/Users/91630/OneDrive/Desktop/taskflow/docs/adr/0001-record-architecture-decisions.md)
 - [ADR 0002: Technology Stack and Database Selection](file:///c:/Users/91630/OneDrive/Desktop/taskflow/docs/adr/0002-technology-stack-and-database-selection.md)
+- [ADR 0003: Modular Monolith Architecture](file:///c:/Users/91630/OneDrive/Desktop/taskflow/docs/adr/0003-modular-monolith-architecture.md)
+
