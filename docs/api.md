@@ -119,11 +119,106 @@ Retrieves profile information for the authenticated user.
 
 ---
 
-## 3. Task Management (User Scoped)
+## 3. Project Management
+
+Projects allow users to group and organize tasks.
+
+### 3.1 Create Project
+Creates a new project for an owner user.
+
+- **Method**: `POST`
+- **Path**: `/api/v1/projects`
+- **Authentication**: None required (v1 pre-auth baseline; accepts `user_id` in payload)
+
+#### Request Body
+```json
+{
+  "name": "Design Mobile App",
+  "description": "Figma mockups and user flows",
+  "user_id": "e5d0e422-67b0-4d58-a827-446259125741"
+}
+```
+
+#### Response (201 Created)
+```json
+{
+  "id": "e1d188bd-6d28-486f-acce-fa30898e986b",
+  "user_id": "e5d0e422-67b0-4d58-a827-446259125741",
+  "name": "Design Mobile App",
+  "description": "Figma mockups and user flows",
+  "created_at": "2026-10-23T15:00:00Z",
+  "updated_at": "2026-10-23T15:00:00Z"
+}
+```
+
+---
+
+### 3.2 List Projects (Paginated)
+Retrieves a paginated list of projects, optionally filtered by `user_id`.
+
+- **Method**: `GET`
+- **Path**: `/api/v1/projects`
+- **Query Parameters**:
+  | Parameter | Type | Default | Description |
+  | :--- | :--- | :--- | :--- |
+  | `limit` | integer | `20` | Max items to return (1 - 100) |
+  | `offset` | integer | `0` | Number of records to skip |
+  | `user_id` | UUID | `null` | Optional filter by owner user ID |
+
+#### Response (200 OK) — Paginated Envelope
+```json
+{
+  "items": [
+    {
+      "id": "e1d188bd-6d28-486f-acce-fa30898e986b",
+      "user_id": "e5d0e422-67b0-4d58-a827-446259125741",
+      "name": "Design Mobile App",
+      "description": "Figma mockups and user flows",
+      "created_at": "2026-10-23T15:00:00Z",
+      "updated_at": "2026-10-23T15:00:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+---
+
+### 3.3 Update Project (Partial)
+Partially updates an existing project's name or description.
+
+- **Method**: `PATCH`
+- **Path**: `/api/v1/projects/{id}`
+
+#### Request Body
+```json
+{
+  "name": "Mobile & Tablet App",
+  "description": "Updated project description"
+}
+```
+
+#### Response (200 OK)
+```json
+{
+  "id": "e1d188bd-6d28-486f-acce-fa30898e986b",
+  "user_id": "e5d0e422-67b0-4d58-a827-446259125741",
+  "name": "Mobile & Tablet App",
+  "description": "Updated project description",
+  "created_at": "2026-10-23T15:00:00Z",
+  "updated_at": "2026-10-23T15:15:00Z"
+}
+```
+
+---
+
+## 4. Task Management (User Scoped)
 
 All task endpoints require an authenticated user (`Authorization: Bearer <token>`). Queries are strictly isolated to the authenticated user's tasks.
 
-### 3.1 List Tasks (Paginated & Filtered)
+### 4.1 List Tasks (Paginated & Filtered)
 Retrieves a paginated list of tasks belonging to the authenticated user.
 
 - **Method**: `GET`
@@ -162,7 +257,7 @@ Retrieves a paginated list of tasks belonging to the authenticated user.
 
 ---
 
-### 3.2 Create Task
+### 4.2 Create Task
 Creates a new task owned by the authenticated user.
 
 - **Method**: `POST`
@@ -197,7 +292,7 @@ Creates a new task owned by the authenticated user.
 
 ---
 
-### 3.3 Get Task by ID
+### 4.3 Get Task by ID
 Retrieves details of a single task.
 
 - **Method**: `GET`
@@ -221,7 +316,7 @@ Retrieves details of a single task.
 
 ---
 
-### 3.4 Update Task
+### 4.4 Update Task
 Updates fields on an existing task. Partial updates are supported.
 
 - **Method**: `PUT` (or `PATCH`)
@@ -253,7 +348,7 @@ Updates fields on an existing task. Partial updates are supported.
 
 ---
 
-### 3.5 Delete Task
+### 4.5 Delete Task
 Permanently deletes a task belonging to the authenticated user.
 
 - **Method**: `DELETE`
@@ -265,7 +360,7 @@ Permanently deletes a task belonging to the authenticated user.
 
 ---
 
-## 4. Error Responses (RFC 9457 — Problem Details)
+## 5. Error Responses (RFC 9457 — Problem Details)
 
 TaskFlow adheres to the **RFC 9457 standard** (`application/problem+json`) for all non-2xx responses. Every error payload contains a consistent, machine-readable structure:
 
@@ -280,7 +375,7 @@ TaskFlow adheres to the **RFC 9457 standard** (`application/problem+json`) for a
 }
 ```
 
-### 4.1 Example: 404 Resource Not Found
+### 5.1 Example: 404 Resource Not Found
 Returned when the requested task ID does not exist or does not belong to the user.
 
 ```json
@@ -295,7 +390,7 @@ Returned when the requested task ID does not exist or does not belong to the use
 
 ---
 
-### 4.2 Example: 401 Unauthorized
+### 5.2 Example: 401 Unauthorized
 Returned when a request is missing an `Authorization` header or presents an expired/invalid JWT.
 
 ```json
@@ -310,7 +405,7 @@ Returned when a request is missing an `Authorization` header or presents an expi
 
 ---
 
-### 4.3 Example: 422 Unprocessable Content (Validation Error)
+### 5.3 Example: 422 Unprocessable Content (Validation Error)
 Returned when request parameters or payload fail Pydantic schema validation.
 
 ```json
@@ -335,7 +430,7 @@ Returned when request parameters or payload fail Pydantic schema validation.
 
 ---
 
-## 5. Standard HTTP Status Codes Summary
+## 6. Standard HTTP Status Codes Summary
 
 | Status Code | Description | Usage in TaskFlow |
 | :--- | :--- | :--- |
