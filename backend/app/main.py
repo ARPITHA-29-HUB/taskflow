@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.projects import router as projects_router
+from app.routers.tasks import router as tasks_router
 
 app = FastAPI(
     title="TaskFlow API",
@@ -23,6 +24,7 @@ app.add_middleware(
 
 # Register API Routers
 app.include_router(projects_router, prefix="/api/v1/projects", tags=["projects"])
+app.include_router(tasks_router, prefix="/api/v1/tasks", tags=["tasks"])
 
 
 @app.get("/")

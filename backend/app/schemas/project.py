@@ -34,3 +34,12 @@ class ProjectListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class ProjectSummaryResponse(BaseModel):
+    """Aggregated task counts by status for a project."""
+    project_id: uuid.UUID
+    total_tasks: int
+    todo: int
+    in_progress: int
+    done: int

@@ -9,6 +9,7 @@ services:
     environment:
       - APP_ENV=production
       - DATABASE_URL=sqlite:////app/data/taskflow.db
+      - REDIS_URL=redis://redis:6379/0
       - CORS_ORIGINS=http://localhost:5173,http://localhost:80,http://localhost:3000
     volumes:
       - taskflow-db:/app/data
@@ -18,7 +19,42 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: taskflow-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 3s
+    restart: unless-stopped
+
+  # Optional Background Worker (runs only when invoked with: docker compose --profile worker up)
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: taskflow-worker
+    command: python -m rq worker reminders --url redis://redis:6379/0
+    environment:
+      - APP_ENV=production
+      - DATABASE_URL=sqlite:////app/data/taskflow.db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - worker
+    restart: unless-stopped
+
 
   frontend:
     build:

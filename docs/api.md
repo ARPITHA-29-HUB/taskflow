@@ -214,6 +214,30 @@ Partially updates an existing project's name or description.
 
 ---
 
+### 3.4 Get Project Summary (Task Counts by Status)
+Returns aggregated task counts grouped by status for a specific project.
+Utilizes Cache-Aside with a 60-second TTL and automatic database fallback.
+
+- **Method**: `GET`
+- **Path**: `/api/v1/projects/{id}/summary`
+- **Authentication**: None required (v1 pre-auth baseline)
+
+#### Response (200 OK)
+```json
+{
+  "project_id": "e1d188bd-6d28-486f-acce-fa30898e986b",
+  "total_tasks": 3333,
+  "todo": 1120,
+  "in_progress": 1105,
+  "done": 1108
+}
+```
+
+#### Error Responses
+- `404 Not Found`: Returned when the requested project ID does not exist.
+
+---
+
 ## 4. Task Management (User Scoped)
 
 All task endpoints require an authenticated user (`Authorization: Bearer <token>`). Queries are strictly isolated to the authenticated user's tasks.
