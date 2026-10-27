@@ -116,6 +116,7 @@ def get_task(task_id: uuid.UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 
+@router.put("/{task_id}", response_model=TaskResponse, status_code=http_status.HTTP_200_OK)
 @router.patch("/{task_id}", response_model=TaskResponse, status_code=http_status.HTTP_200_OK)
 def update_task(
     task_id: uuid.UUID,

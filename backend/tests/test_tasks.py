@@ -403,3 +403,47 @@ def test_delete_task_not_found(client):
     missing_id = uuid.uuid4()
     del_res = client.delete(f"/api/v1/tasks/{missing_id}")
     assert del_res.status_code == 404
+
+
+def test_put_update_task_success(client, sample_user, sample_project):
+    """Test updating task via PUT endpoint according to documented contract."""
+    create_res = client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "PUT Task",
+            "user_id": str(sample_user.id),
+            "project_id": str(sample_project.id),
+            "status": "todo",
+        },
+    )
+    task_id = create_res.json()["id"]
+
+    put_res = client.put(
+        f"/api/v1/tasks/{task_id}",
+        json={
+            "title": "Updated via PUT",
+            "status": "in_progress",
+            "priority": "low",
+        },
+    )
+    assert put_res.status_code == 200
+    assert put_res.json()["title"] == "Updated via PUT"
+    assert put_res.json()["status"] == "in_progress"
+    assert put_res.json()["priority"] == "low"
+
+
+def test_create_task_schema_validation_error_422(client, sample_user):
+    """Test that invalid request body format triggers 422 Unprocessable Entity."""
+    # Empty title
+    res_empty_title = client.post(
+        "/api/v1/tasks",
+        json={"title": "", "user_id": str(sample_user.id)},
+    )
+    assert res_empty_title.status_code == 422
+
+    # Invalid priority enum
+    res_invalid_prio = client.post(
+        "/api/v1/tasks",
+        json={"title": "Valid Title", "user_id": str(sample_user.id), "priority": "ultra-critical"},
+    )
+    assert res_invalid_prio.status_code == 422
