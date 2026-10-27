@@ -139,48 +139,96 @@ The frontend will start at [http://localhost:5173/](http://localhost:5173/).
 
 ---
 
-### 4. Running Backend Tests
+### 4. Running Tests & Code Quality
 
-Run the Pytest suite from the repository root:
+#### Backend Tests & Coverage
+Run the Pytest suite with code coverage:
 
 ```bash
-# Using the backend virtual environment:
-backend\.venv\Scripts\pytest backend/tests -v
-
-# Or from within backend directory:
 cd backend
-pytest -v
+# Run all tests with coverage report
+pytest -v --cov=app --cov-report=term-missing
 ```
 
----
+#### Backend Linting & Type Checking
+```bash
+cd backend
+# Ruff linting
+ruff check app tests
 
-### 5. Building Frontend
+# Ruff format checking
+ruff format --check app tests
 
-To test and compile the production build:
+# Mypy type checking
+mypy app --ignore-missing-imports
+```
 
+#### Frontend Tests, Linting & Build
 ```bash
 cd frontend
+# Run Oxlint
 npm run lint
+
+# Run Vitest test suite
+npm test
+
+# Build production bundle
 npm run build
 ```
 
 ---
 
-### 6. Running with Docker Compose
+### 5. Git Pre-Commit Hooks (Ruff)
 
-To build and start both the backend and frontend in containers:
+This repository includes pre-commit hooks enforcing Ruff linting, formatting, and file hygiene before each commit:
+
+```bash
+# 1. Install pre-commit (if not already installed)
+pip install pre-commit ruff
+
+# 2. Install git hook scripts into .git/hooks
+pre-commit install
+
+# 3. Manually run hooks against all tracked files
+pre-commit run --all-files
+```
+
+---
+
+### 6. Security & Automated Dependency Management
+
+- **Dependabot**: Automated weekly updates for GitHub Actions, pip (Python), and npm packages configured in `.github/dependabot.yml`.
+- **Secret Scanning & Push Protection**: In GitHub repository settings under **Settings -> Code security and analysis**, ensure **Secret scanning** and **Push protection** are enabled to prevent accidental exposure of tokens or database passwords.
+- **Environment Isolation**: `.dockerignore` and `.gitignore` prevent `.env` credentials, SQLite database files, and virtual environments from ever entering Docker images or version control.
+
+---
+
+### 7. Running with Docker Compose
+
+To build and start the complete containerized stack (PostgreSQL, Redis, Alembic migrations, FastAPI backend API, and React/Nginx web server):
 
 ```bash
 docker compose up --build
 ```
 
-- **Frontend**: [http://localhost:5173](http://localhost:5173)
+#### Services Started:
+- **`postgres`**: PostgreSQL 16 on port `5432` with persistent volume `postgres_data`.
+- **`redis`**: Redis 7 on port `6379` with persistent volume `redis_data`.
+- **`migration`**: Safe, dedicated one-off container running `alembic upgrade head` before API replicas launch.
+- **`api`**: Multi-stage Python 3.12-slim container running as non-root user `taskflow` on [http://localhost:8000](http://localhost:8000).
+- **`web`**: Multi-stage Node 22 build served via Nginx on [http://localhost:5173](http://localhost:5173).
+- **`worker`** *(Optional)*: Background RQ worker profile (`docker compose --profile worker up`).
+
+#### Service Access Endpoints:
+- **Frontend Web UI**: [http://localhost:5173](http://localhost:5173)
 - **Backend API**: [http://localhost:8000](http://localhost:8000)
-- **Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **API Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
+- **Database Readiness Probe**: [http://localhost:8000/ready](http://localhost:8000/ready)
+- **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
-### 7. Troubleshooting & FAQ
+### 8. Troubleshooting & FAQ
 
 #### Port Already in Use (Conflict)
 If port `8000` or `5173` is occupied by another local service:

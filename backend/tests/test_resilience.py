@@ -10,12 +10,13 @@ Tests cover:
 6. Deterministic exponential backoff calculation and delay capping
 """
 
-import pytest
 import httpx
+import pytest
+
 from app.resilience import (
-    call_with_retry,
-    calculate_backoff_delay,
     MaxRetriesExceededError,
+    calculate_backoff_delay,
+    call_with_retry,
 )
 
 
@@ -169,8 +170,10 @@ def test_non_retryable_404_error_does_not_retry():
 
 def test_backoff_delay_calculation_and_cap():
     """Verify that exponential backoff respects base delay, power of 2 growth, and maximum cap."""
+
     # Deterministic mock jitter: always return upper bound
-    max_jitter = lambda low, high: high
+    def max_jitter(low, high):
+        return high
 
     # Attempt 0: 0.5 * (2^0) = 0.5s
     assert calculate_backoff_delay(0, base_delay=0.5, max_delay=3.0, jitter_func=max_jitter) == 0.5

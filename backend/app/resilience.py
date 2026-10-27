@@ -12,6 +12,7 @@ import logging
 import random
 import time
 from typing import Callable, Optional, Set
+
 import httpx
 
 logger = logging.getLogger("taskflow.resilience")
@@ -34,7 +35,9 @@ RETRYABLE_EXCEPTIONS = (
 class MaxRetriesExceededError(Exception):
     """Raised when an outbound HTTP request exhausts all allocated retry attempts."""
 
-    def __init__(self, attempts: int, last_error: Optional[Exception] = None, last_response: Optional[httpx.Response] = None):
+    def __init__(
+        self, attempts: int, last_error: Optional[Exception] = None, last_response: Optional[httpx.Response] = None
+    ):
         self.attempts = attempts
         self.last_error = last_error
         self.last_response = last_response
@@ -53,13 +56,13 @@ def calculate_backoff_delay(
     jitter_func: Optional[Callable[[float, float], float]] = None,
 ) -> float:
     """Calculate exponential backoff delay with full jitter.
-    
+
     Formula: delay = random.uniform(0, min(max_delay, base_delay * (2 ** attempt)))
     """
     if jitter_func is None:
         jitter_func = random.uniform
 
-    exponential = min(max_delay, base_delay * (2 ** attempt))
+    exponential = min(max_delay, base_delay * (2**attempt))
     # Full jitter: uniformly distribute between 0 and the exponential cap
     return max(0.0, jitter_func(0.0, exponential))
 
@@ -77,10 +80,10 @@ def call_with_retry(
     **kwargs,
 ) -> tuple[httpx.Response, int]:
     """Execute an outbound HTTP request with exponential backoff and jitter.
-    
+
     Returns:
         tuple[httpx.Response, int]: The successful or final response and total attempts made.
-    
+
     Raises:
         MaxRetriesExceededError: If all retry attempts are exhausted due to transient failures.
     """
@@ -90,7 +93,7 @@ def call_with_retry(
 
     for attempt in range(total_allowed_attempts):
         attempt_number = attempt + 1
-        is_last_attempt = (attempt_number == total_allowed_attempts)
+        is_last_attempt = attempt_number == total_allowed_attempts
 
         try:
             logger.info(f"[OUTBOUND HTTP] Attempt {attempt_number}/{total_allowed_attempts} -> {method.upper()} {url}")
@@ -103,9 +106,7 @@ def call_with_retry(
 
             # Transient 502/503/504 error
             last_response = response
-            logger.warning(
-                f"[TRANSIENT HTTP ERROR] Attempt {attempt_number} received status {response.status_code}."
-            )
+            logger.warning(f"[TRANSIENT HTTP ERROR] Attempt {attempt_number} received status {response.status_code}.")
 
         except RETRYABLE_EXCEPTIONS as exc:
             # Transient Network or Timeout Error

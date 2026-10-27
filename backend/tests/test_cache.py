@@ -1,17 +1,18 @@
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
+from redis.exceptions import RedisError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from redis.exceptions import RedisError
 
-from app.main import app
+from app.cache import CacheService, get_cache
 from app.database import Base, get_db
-from app.cache import get_cache, CacheService
-from app.models.user import User
+from app.main import app
 from app.models.project import Project
 from app.models.task import Task
+from app.models.user import User
 
 # Isolated in-memory SQLite database for tests
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -108,7 +109,14 @@ def seed_data(db_session):
     tasks = [
         Task(id=uuid.uuid4(), user_id=user.id, project_id=project.id, title="Task 1", status="todo", priority="high"),
         Task(id=uuid.uuid4(), user_id=user.id, project_id=project.id, title="Task 2", status="todo", priority="medium"),
-        Task(id=uuid.uuid4(), user_id=user.id, project_id=project.id, title="Task 3", status="in_progress", priority="low"),
+        Task(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            project_id=project.id,
+            title="Task 3",
+            status="in_progress",
+            priority="low",
+        ),
         Task(id=uuid.uuid4(), user_id=user.id, project_id=project.id, title="Task 4", status="done", priority="high"),
     ]
     db_session.add_all(tasks)

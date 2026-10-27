@@ -1,17 +1,20 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, TYPE_CHECKING
-from sqlalchemy import String, Text, DateTime, Uuid, ForeignKey, CheckConstraint, Index
+from typing import TYPE_CHECKING, Optional
+
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
 
 if TYPE_CHECKING:
-    from app.models.user import User
     from app.models.project import Project
+    from app.models.user import User
 
 
 class Task(Base):
     """Task item model with priority, status, due date, and composite indexing."""
+
     __tablename__ = "tasks"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

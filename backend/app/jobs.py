@@ -23,15 +23,16 @@ Recommended for TaskFlow: RQ (Redis Queue)
 """
 
 import logging
-import os
 from datetime import datetime
+
+from app.config import settings
 
 logger = logging.getLogger("taskflow.jobs")
 
 
 def send_task_reminder(task_id: str, title: str, due_date: str) -> str:
     """Worker job function to send a task reminder notification.
-    
+
     This function is executed by the background worker process, completely
     isolated from the FastAPI web server.
     """
@@ -42,13 +43,13 @@ def send_task_reminder(task_id: str, title: str, due_date: str) -> str:
 
 def enqueue_task_reminder(task_id: str, title: str, due_date: datetime):
     """Example helper demonstrating how to enqueue a durable reminder job into RQ.
-    
+
     Usage in FastAPI endpoint:
         from app.jobs import enqueue_task_reminder
         enqueue_task_reminder(str(task.id), task.title, task.due_date)
     """
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    
+    redis_url = settings.REDIS_URL
+
     try:
         from redis import Redis
         from rq import Queue
@@ -56,7 +57,7 @@ def enqueue_task_reminder(task_id: str, title: str, due_date: datetime):
         redis_conn = Redis.from_url(redis_url)
         # Place job in dedicated 'reminders' queue
         queue = Queue("reminders", connection=redis_conn)
-        
+
         job = queue.enqueue(
             send_task_reminder,
             task_id=str(task_id),
@@ -67,9 +68,7 @@ def enqueue_task_reminder(task_id: str, title: str, due_date: datetime):
         logger.info(f"[RQ PRODUCER] Enqueued reminder job {job.id} for task {task_id}")
         return job.id
     except ImportError:
-        logger.warning(
-            "[RQ PRODUCER] 'rq' package is not installed. To run worker queue, install 'rq'."
-        )
+        logger.warning("[RQ PRODUCER] 'rq' package is not installed. To run worker queue, install 'rq'.")
         return None
     except Exception as e:
         logger.error(f"[RQ PRODUCER] Failed to enqueue reminder to Redis broker: {e}")

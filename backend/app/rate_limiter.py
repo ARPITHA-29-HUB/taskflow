@@ -6,20 +6,23 @@ with Redis-backed shared storage, automatic in-memory fallback, and safe
 proxy header handling.
 """
 
+import logging
 import math
 import os
 import time
-import logging
-from typing import Optional, Any
-from fastapi import Request, HTTPException, status, Depends
+from typing import Any, Optional
+
 import redis
+from fastapi import Depends, HTTPException, Request, status
 from redis.exceptions import RedisError
+
+from app.config import settings
 
 logger = logging.getLogger("taskflow.rate_limiter")
 logger.setLevel(logging.INFO)
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-DEFAULT_TRUSTED_PROXIES = "127.0.0.1,::1,localhost,testclient"
+REDIS_URL = settings.REDIS_URL
+DEFAULT_TRUSTED_PROXIES = settings.TRUSTED_PROXIES
 DEFAULT_CAPACITY = 30.0  # Max burst tokens
 DEFAULT_REFILL_RATE = 30.0 / 60.0  # 0.5 tokens/sec (30 tokens per minute)
 KEY_EXPIRATION_TTL = 120  # TTL for inactive Redis keys
@@ -62,7 +65,7 @@ end
 
 def get_client_identifier(request: Request, trusted_proxies: Optional[set[str]] = None) -> str:
     """Safely identify client without blindly trusting spoofable proxy headers.
-    
+
     Strategy:
     1. Authorization header (authenticated user/token) if present.
     2. Direct connection IP from request.client.host.
@@ -205,9 +208,7 @@ class RateLimiterService:
         allowed, retry_after, remaining = self.evaluate(rate_limit_key, requested=1)
 
         if not allowed:
-            logger.warning(
-                f"[RATE LIMIT EXCEEDED] client={client_id} key={rate_limit_key} retry_after={retry_after}s"
-            )
+            logger.warning(f"[RATE LIMIT EXCEEDED] client={client_id} key={rate_limit_key} retry_after={retry_after}s")
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Rate limit exceeded: 30 requests per minute allowed.",

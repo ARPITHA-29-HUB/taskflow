@@ -1,0 +1,9 @@
+.git
+.gitignore
+.dockerignore
+.github/
+docs/
+.env
+.env.*
+*.md
+.pytest_cache/

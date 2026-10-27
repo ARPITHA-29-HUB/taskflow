@@ -6,3 +6,9 @@ pytest
 httpx
 python-dotenv
 redis
+pydantic-settings
+pytest-cov
+psycopg2-binary
+ruff
+mypy
+

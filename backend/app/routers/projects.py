@@ -1,25 +1,26 @@
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from sqlalchemy import func
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.cache import CacheService, get_cache
 from app.database import get_db
-from app.cache import get_cache, CacheService
-from app.rate_limiter import rate_limit_task_creation
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
+from app.rate_limiter import rate_limit_task_creation
+from app.routers.tasks import create_task
 from app.schemas.project import (
     ProjectCreate,
-    ProjectUpdate,
-    ProjectResponse,
     ProjectListResponse,
+    ProjectResponse,
     ProjectSummaryResponse,
+    ProjectUpdate,
 )
 from app.schemas.task import TaskCreate, TaskResponse
-from app.routers.tasks import create_task
 
 router = APIRouter()
 
@@ -71,7 +72,7 @@ def list_projects(
     items = query.order_by(Project.created_at.desc()).offset(offset).limit(limit).all()
 
     return ProjectListResponse(
-        items=items,
+        items=[ProjectResponse.model_validate(p) for p in items],
         total=total,
         limit=limit,
         offset=offset,
@@ -133,10 +134,7 @@ def get_project_summary(
 
     # 3. Query Database for task counts by status
     status_counts = (
-        db.query(Task.status, func.count(Task.id))
-        .filter(Task.project_id == project_id)
-        .group_by(Task.status)
-        .all()
+        db.query(Task.status, func.count(Task.id)).filter(Task.project_id == project_id).group_by(Task.status).all()
     )
 
     summary_map = {status: count for status, count in status_counts}
@@ -175,4 +173,3 @@ def create_task_for_project(
     """Create a new task specifically within a project (enforces 30 req/min rate limit)."""
     payload.project_id = project_id
     return create_task(payload=payload, background_tasks=background_tasks, db=db, cache=cache)
-

@@ -1,16 +1,17 @@
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.main import app
-from app.database import Base, get_db
 from app.cache import get_cache
-from app.rate_limiter import get_rate_limiter, RateLimiterService
-from app.models.user import User
+from app.database import Base, get_db
+from app.main import app
 from app.models.project import Project
+from app.models.user import User
+from app.rate_limiter import RateLimiterService, get_rate_limiter
 
 # Isolated in-memory SQLite engine for tests
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -25,12 +26,16 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 class DummyCache:
     """Mock cache to prevent real Redis calls during testing."""
+
     def get(self, key: str):
         return None
+
     def set(self, key: str, value, ttl: int = 60):
         return True
+
     def delete(self, key: str):
         return True
+
     def invalidate_project_summary(self, project_id):
         return True
 
@@ -181,7 +186,7 @@ def test_rate_limiter_spoofed_proxy_header_protection(client, sample_user, sampl
 
     # An attacker rotates X-Forwarded-For on every request, but their direct connection is untrusted
     for i in range(30):
-        res = client.post("/api/v1/tasks", json=payload, headers={"X-Forwarded-For": f"10.0.0.{i+1}"})
+        res = client.post("/api/v1/tasks", json=payload, headers={"X-Forwarded-For": f"10.0.0.{i + 1}"})
         assert res.status_code == 201
 
     # The 31st request with yet another spoofed IP is STILL blocked because the direct host was throttled

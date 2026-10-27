@@ -1,20 +1,24 @@
-import os
 import json
-import uuid
 import logging
-from typing import Optional, Any
+import uuid
+from typing import Any, Optional
+
 import redis
 from redis.exceptions import RedisError
+
+from app.config import settings
 
 logger = logging.getLogger("taskflow.cache")
 logger.setLevel(logging.INFO)
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = settings.REDIS_URL
 DEFAULT_CACHE_TTL = 60  # seconds
 
 
 class CacheService:
     """Resilient Cache-Aside service with logging and automatic database fallback."""
+
+    _client: Optional[redis.Redis]
 
     def __init__(self, redis_client: Optional[redis.Redis] = None):
         if redis_client is not None:

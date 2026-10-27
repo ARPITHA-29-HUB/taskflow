@@ -1,19 +1,18 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.main import app
+from app.cache import get_cache
 from app.database import Base, get_db
-from app.cache import get_cache, CacheService
-from app.models.user import User
+from app.main import app
 from app.models.project import Project
-from app.models.task import Task
-
+from app.models.user import User
 
 # Setup isolated in-memory SQLite engine for tests
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -28,6 +27,7 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 class FakeCacheService:
     """In-memory cache simulator for testing cache operations and invalidations."""
+
     def __init__(self):
         self.store = {}
 
@@ -64,6 +64,7 @@ def fake_cache():
 @pytest.fixture(scope="function")
 def client(db_session, fake_cache):
     """Override get_db and get_cache with test doubles."""
+
     def override_get_db():
         try:
             yield db_session
@@ -112,6 +113,9 @@ def sample_project(db_session, sample_user):
     return project
 
 
+# 1. Task Creation & Background Reminder Integration Tests
+
+
 def test_create_task_with_due_date_triggers_background_reminder(client, sample_user, sample_project):
     """Test that creating a task with a due date triggers the in-process background reminder."""
     due_date = "2026-10-30T15:00:00Z"
@@ -141,7 +145,6 @@ def test_create_task_with_due_date_triggers_background_reminder(client, sample_u
         # 2. FastAPI BackgroundTasks should have executed the reminder function
         mock_reminder.assert_called_once()
         call_args = mock_reminder.call_args[0]
-        # Verify arguments: task_id, title, due_date
         assert str(call_args[0]) == data["id"]
         assert call_args[1] == "Build Background Jobs"
         assert isinstance(call_args[2], datetime)
@@ -163,7 +166,6 @@ def test_create_task_without_due_date_does_not_trigger_reminder(client, sample_u
 
         assert response.status_code == 201
         assert response.json()["due_date"] is None
-        # Should not trigger reminder
         mock_reminder.assert_not_called()
 
 
@@ -181,8 +183,6 @@ def test_create_task_invalidates_project_summary_cache(client, sample_user, samp
 
     response = client.post("/api/v1/tasks", json=payload)
     assert response.status_code == 201
-
-    # Verify cache key was purged upon task creation
     assert fake_cache.get(cache_key) is None
 
 
@@ -208,3 +208,198 @@ def test_create_task_nonexistent_project_returns_400(client, sample_user):
     response = client.post("/api/v1/tasks", json=payload)
     assert response.status_code == 400
     assert "does not exist" in response.json()["detail"]
+
+
+# 2. Task Listing, Filtering, and Pagination Integration Tests
+
+
+def test_list_tasks_pagination_and_filtering(client, sample_user, sample_project):
+    """Test listing tasks with pagination, search, status, and priority filtering."""
+    # Create 3 distinct tasks
+    client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Alpha Research",
+            "user_id": str(sample_user.id),
+            "project_id": str(sample_project.id),
+            "status": "todo",
+            "priority": "low",
+        },
+    )
+    client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Beta Implementation",
+            "user_id": str(sample_user.id),
+            "project_id": str(sample_project.id),
+            "status": "in_progress",
+            "priority": "high",
+        },
+    )
+    client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Gamma Verification",
+            "user_id": str(sample_user.id),
+            "project_id": str(sample_project.id),
+            "status": "done",
+            "priority": "high",
+        },
+    )
+
+    # Filter by status=done
+    res_done = client.get("/api/v1/tasks?status=done")
+    assert res_done.status_code == 200
+    data_done = res_done.json()
+    assert data_done["total"] == 1
+    assert data_done["items"][0]["title"] == "Gamma Verification"
+
+    # Filter by priority=high
+    res_high = client.get("/api/v1/tasks?priority=high")
+    assert res_high.status_code == 200
+    assert res_high.json()["total"] == 2
+
+    # Search keyword
+    res_search = client.get("/api/v1/tasks?search=Beta")
+    assert res_search.status_code == 200
+    assert res_search.json()["total"] == 1
+    assert res_search.json()["items"][0]["title"] == "Beta Implementation"
+
+    # Pagination: limit=2
+    res_paginated = client.get("/api/v1/tasks?limit=2&offset=0")
+    assert res_paginated.status_code == 200
+    assert len(res_paginated.json()["items"]) == 2
+    assert res_paginated.json()["total"] == 3
+
+
+# 3. Get Task by ID Tests
+
+
+def test_get_task_by_id_success(client, sample_user, sample_project):
+    """Test retrieving an existing task by ID."""
+    create_res = client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Fetchable Task",
+            "user_id": str(sample_user.id),
+            "project_id": str(sample_project.id),
+        },
+    )
+    task_id = create_res.json()["id"]
+
+    get_res = client.get(f"/api/v1/tasks/{task_id}")
+    assert get_res.status_code == 200
+    assert get_res.json()["title"] == "Fetchable Task"
+
+
+def test_get_task_by_id_not_found(client):
+    """Test that fetching a non-existent task returns 404."""
+    missing_id = uuid.uuid4()
+    res = client.get(f"/api/v1/tasks/{missing_id}")
+    assert res.status_code == 404
+    assert "was not found" in res.json()["detail"]
+
+
+# 4. Update Task Tests (Status Transitions & Cache Eviction)
+
+
+def test_update_task_success_and_cache_eviction(client, sample_user, sample_project, fake_cache):
+    """Test updating task title and valid status transition, verifying cache invalidation."""
+    create_res = client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Task To Update",
+            "user_id": str(sample_user.id),
+            "project_id": str(sample_project.id),
+            "status": "todo",
+        },
+    )
+    task_id = create_res.json()["id"]
+
+    # Pre-populate project summary cache
+    cache_key = f"project:{sample_project.id}:summary"
+    fake_cache.set(cache_key, {"summary": "cached"})
+    assert fake_cache.get(cache_key) is not None
+
+    # Valid status transition: todo -> in_progress
+    patch_res = client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={
+            "title": "Updated Task Title",
+            "status": "in_progress",
+            "priority": "high",
+        },
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["title"] == "Updated Task Title"
+    assert patch_res.json()["status"] == "in_progress"
+    assert patch_res.json()["priority"] == "high"
+
+    # Verify summary cache was purged
+    assert fake_cache.get(cache_key) is None
+
+
+def test_update_task_invalid_status_transition_returns_400(client, sample_user, sample_project):
+    """Test that an illegal status transition returns 400 Bad Request."""
+    create_res = client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "Transition Test",
+            "user_id": str(sample_user.id),
+            "project_id": str(sample_project.id),
+            "status": "todo",
+        },
+    )
+    task_id = create_res.json()["id"]
+
+    # Illegal transition: status='invalid_status'
+    patch_res = client.patch(
+        f"/api/v1/tasks/{task_id}",
+        json={
+            "status": "invalid_status",
+        },
+    )
+    assert patch_res.status_code == 422 or patch_res.status_code == 400
+
+
+def test_update_task_not_found(client):
+    """Test updating non-existent task returns 404."""
+    missing_id = uuid.uuid4()
+    patch_res = client.patch(f"/api/v1/tasks/{missing_id}", json={"title": "New Title"})
+    assert patch_res.status_code == 404
+
+
+# 5. Delete Task Tests
+
+
+def test_delete_task_success_and_cache_eviction(client, sample_user, sample_project, fake_cache):
+    """Test deleting an existing task returns 204 and purges project summary cache."""
+    create_res = client.post(
+        "/api/v1/tasks",
+        json={
+            "title": "To Be Deleted",
+            "user_id": str(sample_user.id),
+            "project_id": str(sample_project.id),
+        },
+    )
+    task_id = create_res.json()["id"]
+
+    cache_key = f"project:{sample_project.id}:summary"
+    fake_cache.set(cache_key, {"cached": True})
+
+    del_res = client.delete(f"/api/v1/tasks/{task_id}")
+    assert del_res.status_code == 204
+
+    # Verify task is gone
+    get_res = client.get(f"/api/v1/tasks/{task_id}")
+    assert get_res.status_code == 404
+
+    # Verify cache evicted
+    assert fake_cache.get(cache_key) is None
+
+
+def test_delete_task_not_found(client):
+    """Test deleting a non-existent task returns 404."""
+    missing_id = uuid.uuid4()
+    del_res = client.delete(f"/api/v1/tasks/{missing_id}")
+    assert del_res.status_code == 404
