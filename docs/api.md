@@ -46,6 +46,33 @@ Returns service health telemetry, database status, and API version.
 
 ---
 
+### 1.3 Database Readiness Probe
+Performs an active database ping (`SELECT 1`) to verify that relational storage is reachable and ready to process traffic.
+
+- **Method**: `GET`
+- **Path**: `/ready`
+- **Authentication**: None required
+
+#### Response (200 OK)
+```json
+{
+  "status": "ready",
+  "database": "connected"
+}
+```
+
+#### Error Response (503 Service Unavailable)
+Returned if database connectivity fails or timeout is exceeded:
+```json
+{
+  "status": "unavailable",
+  "database": "disconnected",
+  "error": "database connection error details"
+}
+```
+
+---
+
 ## 2. Authentication & Users
 
 ### 2.1 Register New User
@@ -235,6 +262,43 @@ Utilizes Cache-Aside with a 60-second TTL and automatic database fallback.
 
 #### Error Responses
 - `404 Not Found`: Returned when the requested project ID does not exist.
+
+---
+
+### 3.5 Create Task within Project
+Creates a new task scoped directly to a specified project ID. Enforces rate limiting (30 requests/minute per client IP) and schedules an in-process background reminder if `due_date` is supplied.
+
+- **Method**: `POST`
+- **Path**: `/api/v1/projects/{project_id}/tasks`
+- **Authentication**: None required (v1 pre-auth baseline)
+
+#### Request Body
+```json
+{
+  "title": "Setup Nginx Reverse Proxy",
+  "description": "Configure client routing and immutable static asset cache headers",
+  "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+  "status": "todo",
+  "priority": "high",
+  "due_date": "2026-10-30T15:00:00Z"
+}
+```
+
+#### Response (201 Created)
+```json
+{
+  "id": "e5d0e422-67b0-4d58-a827-446259125741",
+  "title": "Setup Nginx Reverse Proxy",
+  "description": "Configure client routing and immutable static asset cache headers",
+  "status": "todo",
+  "priority": "high",
+  "due_date": "2026-10-30T15:00:00Z",
+  "created_at": "2026-10-27T10:00:00Z",
+  "updated_at": "2026-10-27T10:00:00Z",
+  "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+  "project_id": "e1d188bd-6d28-486f-acce-fa30898e986b"
+}
+```
 
 ---
 

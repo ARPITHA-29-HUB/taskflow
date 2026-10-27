@@ -12,17 +12,17 @@ The System Context diagram provides a high-level view of TaskFlow, showing its s
 C4Context
 title System Context Diagram for TaskFlow
 
-Person(user, "TaskFlow User", "Individual user managing personal tasks, priorities, and workflow.")
-System(taskflow, "TaskFlow Platform", "Enables users to securely manage, organize, and track tasks.")
-System_Ext(ci, "GitHub Actions CI", "Validates PRs with automated pytest suites and frontend builds.")
+Person(user, "TaskFlow User", "Individual user managing personal tasks, projects, priorities, and workflow.")
+System(taskflow, "TaskFlow Platform", "Enables users to organize projects, track tasks, and monitor completion metrics.")
+System_Ext(ci, "GitHub Actions CI", "Validates PRs with automated Pytest suites, frontend Vitest tests, linters, and production builds.")
 
-Rel(user, taskflow, "Manages tasks and views dashboard", "HTTPS")
-Rel(ci, taskflow, "Runs automated tests and lints", "Git / Docker")
+Rel(user, taskflow, "Manages tasks, projects, and views dashboard", "HTTPS")
+Rel(ci, taskflow, "Runs automated tests, lints, and builds", "Git / Docker")
 ```
 
 ### 1.2 C4 Level 2: Container Diagram
 
-The Container diagram zooms into the TaskFlow platform to illustrate the deployable software units, their responsibilities, and protocols.
+The Container diagram illustrates the deployable software units, their responsibilities, and protocols.
 
 ```mermaid
 C4Container
@@ -31,16 +31,18 @@ title Container Diagram for TaskFlow
 Person(user, "TaskFlow User", "Interacts via modern web browser")
 
 System_Boundary(c1, "TaskFlow Platform") {
-    Container(spa, "Single-Page Application", "React 19, Vite", "Provides responsive dashboard, optimistic UI, and auth state.")
-    Container(api, "API Application", "Python 3.12, FastAPI", "Delivers REST endpoints, JWT authentication, and business validation.")
-    ContainerDb(db, "Relational Database", "SQLite 3", "Persists user accounts, hashed passwords, and user-scoped tasks.")
-    Container(alembic, "Database Migrations", "Alembic CLI", "Executes version-controlled schema migrations.")
+    Container(spa, "Single-Page Application", "React 19, Vite, Nginx", "Delivers responsive project/task views, filtering, inline editing, and telemetry.")
+    Container(api, "API Application", "Python 3.12, FastAPI, Uvicorn", "Provides REST endpoints, business validation, status state machine, and rate limiting.")
+    Container(cache, "Cache & Broker", "Redis 7 Alpine", "Implements Cache-Aside query caching for project summaries (60s TTL) and sliding-window rate limiting.")
+    ContainerDb(db, "Relational Database", "PostgreSQL 16 / SQLite 3", "Persists users, projects, tasks, and transactional state with referential integrity.")
+    Container(alembic, "Database Migrations", "Alembic CLI", "Executes version-controlled schema upgrades in a dedicated container before API boot.")
 }
 
-Rel(user, spa, "Visits web app", "HTTPS")
-Rel(spa, api, "API calls with JWT Bearer", "JSON / HTTP :8000")
-Rel(api, db, "Reads and writes records", "SQLAlchemy 2.0 ORM")
-Rel(alembic, db, "Applies schema upgrades & rollbacks", "SQL DDL")
+Rel(user, spa, "Visits web app", "HTTPS :5173")
+Rel(spa, api, "API calls with JSON envelopes", "HTTP :8000")
+Rel(api, cache, "Reads/writes cached summaries & rate limits", "Redis Protocol :6379")
+Rel(api, db, "Queries and persists entities", "SQLAlchemy 2.0 ORM :5432")
+Rel(alembic, db, "Applies schema migrations", "SQL DDL :5432")
 ```
 
 ---
@@ -49,50 +51,41 @@ Rel(alembic, db, "Applies schema upgrades & rollbacks", "SQL DDL")
 
 ### 2.1 Explicit Planning Assumptions
 * **Target Scale (v1 MVP)**: Designed for single-tenant or small team deployment with ~1,000 registered users and ~50 concurrent active users.
-* **Traffic Pattern**: Estimated read-heavy distribution: **80% reads** (viewing tasks, polling dashboard) vs. **20% writes** (creating, updating, deleting tasks).
+* **Traffic Pattern**: Estimated read-heavy distribution: **80% reads** (viewing tasks, project summaries, polling dashboard) vs. **20% writes** (creating, updating, deleting tasks).
 * **Payload Profiles**: Standard JSON request/response payloads are small (typically < 10 KB).
 * **Compute Baseline**: Local development and CI runners with 2 vCPUs and 4 GB RAM.
 
 ### 2.2 Functional Requirements (FRs)
 * **FR-1: Authentication & User Accounts**
-  * Users can register with an email and password.
-  * Users can authenticate to obtain a time-limited JSON Web Token (JWT).
-  * Users can query their own authenticated profile (`GET /api/v1/auth/me`).
-* **FR-2: Task CRUD Operations**
-  * Authenticated users can create, read, update, and delete tasks.
-  * Each task contains: `id`, `title` (max 255 chars), `description` (optional text), `status` (`todo`, `in_progress`, `done`), `priority` (`low`, `medium`, `high`), `due_date` (ISO-8601 UTC timestamp), `created_at`, `updated_at`, and `user_id`.
-* **FR-3: Data Isolation & Ownership**
-  * All task queries are strictly scoped to the authenticated `user_id`.
-  * Users cannot view, modify, or delete tasks belonging to other users.
+  * Users can register with email and password (`POST /api/v1/auth/register`).
+  * Users can authenticate to obtain a Bearer JWT (`POST /api/v1/auth/login`).
+  * Users can query their own profile (`GET /api/v1/auth/me`).
+* **FR-2: Project Management**
+  * Users can create projects (`POST /api/v1/projects`) and list paginated projects (`GET /api/v1/projects`).
+  * Projects support partial updates (`PATCH /api/v1/projects/{id}`).
+  * Project summaries return aggregated task status counts with Cache-Aside acceleration (`GET /api/v1/projects/{id}/summary`).
+* **FR-3: Task CRUD & Lifecycle Operations**
+  * Users can create, read, update, and delete tasks (`/api/v1/tasks`).
+  * Task status transitions enforce a valid state machine (`todo <-> in_progress <-> done`).
+  * Creation supports optional due dates with background reminder dispatch.
 * **FR-4: Search, Filtering & Pagination**
-  * Task listing supports filtering by `status` and `priority`.
-  * Task listing supports keyword search across `title` and `description`.
-  * Task listing enforces query pagination (`limit` default 20, max 100; `offset`) and returns total count metadata.
+  * Task listing supports filtering by `status`, `priority`, and `project_id`.
+  * Task listing supports substring search across `title` and `description`.
+  * Listing enforces `limit` (default 20, max 100) and `offset` pagination returning total count metadata.
 * **FR-5: Health & Observability**
-  * The system exposes an unauthenticated health probe (`GET /health`) reporting service status, database connectivity, and API version.
+  * System exposes unauthenticated process liveness (`GET /health`) and active database readiness (`GET /ready`).
+  * Request-ID middleware injects `X-Request-ID` headers and correlates structured JSON logs.
 
 ### 2.3 Non-Functional Requirements (NFRs)
 * **NFR-1: Latency (Response Times)**
-  * **Read Latency**: 95% of task listing and retrieval requests (`GET /api/v1/tasks`, `GET /api/v1/tasks/{id}`) must complete within **≤ 50ms** locally (SQLite embedded) and **≤ 150ms** in containerized environments.
-  * **Write Latency**: 95% of task mutation requests (`POST`, `PUT`, `DELETE`) must complete within **≤ 100ms**.
-  * *(Exception: Password hashing via bcrypt during login/register is intentionally CPU-bound at ~100–250ms for cryptographic security against brute-force attacks).*
-* **NFR-2: Throughput**
-  * The backend must sustain at least **100 Requests Per Second (RPS)** under normal conditions without errors exceeding 0.1%.
-* **NFR-3: Availability & Reliability**
-  * **Target Availability**: 99.5% uptime during prototype/staging phases (allowing scheduled maintenance during development).
-  * Health check endpoint (`GET /health`) response time must be **≤ 10ms**.
-* **NFR-4: Security & Authentication**
-  * Passwords must be hashed using `bcrypt` (cost factor 12) before persistence; plaintext passwords must never appear in logs or database tables.
-  * API endpoints (except `/`, `/health`, and `/api/v1/auth/*`) require a valid Bearer JWT.
-  * Access tokens expire in 60 minutes.
-  * CORS is restricted to explicit origins via environment variables.
-* **NFR-5: Data Integrity & Consistency**
-  * Strong ACID consistency: Relational transactions guarantee that once a task is written or updated, immediate subsequent reads reflect that state.
-  * Foreign key constraints enforced: Deleting a user cascades or prevents orphaned task records.
-* **NFR-6: Maintainability & Code Quality**
-  * Layered modular architecture separating routers, schemas, services, and models.
-  * Automated test coverage ≥ 80% for backend core route handlers and domain logic.
-  * Automated CI pipeline must pass linting and unit tests on every pull request.
+  * **Read Latency**: 95% of task and project listing requests complete within **≤ 50ms** locally (SQLite) and **≤ 150ms** in containerized environments.
+  * **Cached Queries**: Project summary queries served from Redis cache complete within **≤ 15ms**.
+  * **Write Latency**: 95% of mutation requests (`POST`, `PUT`, `DELETE`) complete within **≤ 100ms**.
+* **NFR-2: Rate Limiting & Resilience**
+  * Task creation is rate limited to 30 requests/minute per client IP to mitigate spam and resource starvation.
+  * Database operations feature transaction rollbacks on integrity violations.
+* **NFR-3: Error Handling & Standards**
+  * All non-2xx HTTP responses adhere to RFC 9457 (`application/problem+json`) with standard `type`, `title`, `status`, `detail`, and optional `invalid_params`.
 
 ---
 
@@ -101,95 +94,141 @@ Rel(alembic, db, "Applies schema upgrades & rollbacks", "SQL DDL")
 | Layer | Technology | Version | Purpose |
 | :--- | :--- | :--- | :--- |
 | **Backend API** | Python / FastAPI | 3.12 / 0.153+ | High-performance asynchronous REST API framework |
-| **ORM & DB Access** | SQLAlchemy | 2.0+ | Type-safe SQL database abstraction and query building |
-| **Schema Migrations**| Alembic | 1.20+ | Declarative and repeatable database schema evolution |
-| **Backend Testing** | Pytest / HTTPX | 9.1+ / 0.28+ | Automated unit, endpoint, and integration test suite |
-| **Frontend UI** | React / Vite | 19 / 8.3+ | Component-driven user interface with ultra-fast HMR |
-| **Database** | SQLite 3 | Embedded | Zero-configuration relational database with WAL support |
-| **Containerization**| Docker Compose | v2+ | Unified local multi-service container orchestration |
-| **Continuous Integration** | GitHub Actions | Standard | Automated testing and build verification on push / PR |
+| **Configuration** | Pydantic Settings | 2.0+ | Centralized, validated environment configuration with `.env` support |
+| **ORM & DB Access** | SQLAlchemy | 2.0+ | Type-safe SQL database abstraction and dialect-neutral models |
+| **Schema Migrations**| Alembic | 1.20+ | Declarative and reversible database schema evolution |
+| **Caching & Rate Limit**| Redis | 7-alpine | In-memory Cache-Aside store and rate limiter backend |
+| **Backend Testing** | Pytest / HTTPX | 9.1+ / 0.28+ | Automated unit, service, integration, and coverage test suite |
+| **Frontend UI** | React / Vite | 19 / 8.3+ | Component-driven user interface with CSS variable tokens |
+| **Frontend Testing** | Vitest / RTL | 5.0+ / 16.3+ | Component integration testing and API client unit tests |
+| **Database** | PostgreSQL / SQLite | 16 / 3.x | PostgreSQL for production/Docker; SQLite for lightweight local testing |
+| **Web Server** | Nginx | 1.27-alpine | Production SPA web server with immutable asset caching |
+| **Containerization**| Docker Compose | v2+ | Multi-service orchestration (`postgres`, `redis`, `migration`, `api`, `web`) |
+| **CI / Quality** | GitHub Actions / Ruff / Oxlint | Pinned | Multi-job workflow enforcing lint, format, type, test, and build |
 
 ---
 
 ## 4. Backend Architecture
 
-The backend follows an idiomatic, layered architecture:
+The backend follows an idiomatic, layered architecture isolating transport, validation, business domain logic, and data access:
 
 ```
 backend/
 ├── app/
-│   ├── main.py          # FastAPI application entrypoint, CORS & middleware
-│   ├── database.py      # SQLAlchemy engine, session maker, Base, and session dependency
-│   ├── models/          # (Day 1+) SQLAlchemy ORM models
-│   ├── schemas/         # (Day 1+) Pydantic request/response validation schemas
-│   ├── routers/         # (Day 2+) Modular API route handlers
-│   └── services/        # (Day 2+) Domain business logic & data operations
-├── migrations/          # Alembic migration scripts and version tracking
-│   ├── env.py           # Migration environment context configuration
-│   └── versions/        # Version revision files
-├── tests/               # Pytest suite
-│   ├── __init__.py
-│   └── test_health.py   # Health endpoint & root route test suite
-├── alembic.ini          # Alembic configuration
-└── requirements.txt     # Python package dependencies
+│   ├── main.py              # FastAPI application entrypoint, CORS & route mounting
+│   ├── config.py            # Pydantic Settings centralization (.env, env vars)
+│   ├── database.py          # SQLAlchemy engine, SessionLocal, Base, get_db dependency
+│   ├── cache.py             # Redis client, Cache-Aside service, summary invalidation
+│   ├── rate_limiter.py      # Sliding-window rate limiting dependency (30 req/min)
+│   ├── middleware.py        # Request-ID tracking (X-Request-ID) & JSON structured logging
+│   ├── models/              # SQLAlchemy ORM entity definitions
+│   │   ├── user.py          # User account entity (email, password hash)
+│   │   ├── project.py       # Project entity (owner FK, name, description)
+│   │   └── task.py          # Task entity (status/priority checks, user/project FKs)
+│   ├── schemas/             # Pydantic request/response validation contracts
+│   │   ├── user.py          # User registration, login, and response schemas
+│   │   ├── project.py       # Project create, update, list, and summary schemas
+│   │   └── task.py          # Task create, update, list, and response schemas
+│   ├── routers/             # HTTP route handlers (thin controllers)
+│   │   ├── auth.py          # Registration, login, /me endpoints
+│   │   ├── projects.py      # Project CRUD, summary, and nested task creation
+│   │   └── tasks.py         # Task CRUD, filters, pagination, reminders
+│   └── services/            # Domain business logic isolated from HTTP transport
+│       └── task_service.py  # Status transition state machine, task queries, validation
+├── migrations/              # Alembic migration scripts and version tracking
+│   ├── env.py               # Migration environment context configuration
+│   └── versions/            # Reversible migration revision scripts
+├── tests/                   # Automated Pytest suite
+│   ├── conftest.py          # Test fixtures, database isolation, mock cache
+│   ├── test_health.py       # Health and readiness endpoint tests
+│   ├── test_task_service.py # Domain unit tests for status transition state machine
+│   ├── test_tasks.py        # Task REST API endpoint integration tests
+│   ├── test_projects.py     # Project REST API & summary integration tests
+│   ├── test_cache.py        # Cache-Aside and eviction integration tests
+│   ├── test_rate_limiter.py # Rate limiter enforcement tests
+│   ├── test_observability.py# Request-ID and JSON logging tests
+│   └── test_database_compatibility.py # SQLite and PostgreSQL dialect validation
+├── alembic.ini              # Alembic migration configuration
+├── Dockerfile               # Multi-stage Python 3.12-slim production container
+└── requirements.txt         # Pinned Python package dependencies
 ```
 
-### Key Principles
-1. **Dependency Injection**: Database sessions (`get_db`) and authentication are injected via FastAPI dependencies.
-2. **Environment Configuration**: Runtime settings are read from environment variables with sensible development defaults.
-3. **CORS Security**: Cross-Origin Resource Sharing is controlled via `CORS_ORIGINS`.
+### Key Principles & Patterns
+1. **Separation of Concerns**: HTTP handlers in `routers/` validate inputs via Pydantic and delegate execution to `services/task_service.py`. Database models in `models/` define constraints without HTTP dependencies.
+2. **Status Transition State Machine**: Valid status transitions (`todo <-> in_progress <-> done`) are strictly enforced in `TaskService`. Invalid transitions raise domain exceptions mapped to HTTP 400 with RFC 9457 error payloads.
+3. **Cache-Aside Pattern**: Project summaries (`GET /api/v1/projects/{id}/summary`) first query Redis. On cache miss, aggregated counts are computed via database query and cached with a 60-second TTL. Any task mutation within the project automatically evicts the cache entry.
+4. **Structured JSON Logging**: Every incoming request is assigned a UUID `X-Request-ID`. Logs output machine-parseable JSON containing timestamp, level, method, path, status, latency, and client IP.
 
 ---
 
 ## 5. Frontend Architecture
 
-The frontend is a single-page application built on React 19 and Vite:
+The frontend is a modern single-page application built with React 19 and Vite 8:
 
 ```
 frontend/
-├── index.html           # HTML entry point with metadata and fonts
-├── vite.config.js       # Vite build & plugin configuration
-├── package.json         # Scripts and NPM dependencies
+├── index.html               # HTML entry point with modern typography
+├── package.json             # NPM package scripts & pinned dependencies
+├── vite.config.js           # Vite build configuration with Vitest setup
+├── nginx.conf               # Nginx reverse proxy & SPA fallback configuration
+├── Dockerfile               # Multi-stage container (Node 22 builder -> Nginx runner)
 └── src/
-    ├── main.jsx         # React root mounting
-    ├── App.jsx          # Root dashboard, telemetry inspector, and task manager
-    ├── App.css          # Component layout, card styles, and animations
-    ├── index.css        # Core design system tokens, typography, and theme
-    └── assets/          # Static icons and imagery
+    ├── main.jsx             # React DOM root mounting
+    ├── api.js               # Centralized API client module with RFC 9457 error parsing
+    ├── App.jsx              # Main orchestrator (projects, detail view, task list, filters)
+    ├── App.css              # Component layout, card styles, and animations
+    ├── index.css            # Design system tokens, dark theme, and typography
+    ├── api.test.js          # API client unit test suite (11 tests)
+    └── App.test.jsx         # React Testing Library integration test suite (13 tests)
 ```
 
-### Key Principles
-- **Modern Design System**: CSS variables provide unified color palettes, spacing, and glassmorphic elevation without heavy external UI dependencies.
-- **Resilient Network Handling**: Configurable API endpoints (`VITE_API_URL`) with graceful connection failure handling and latency telemetry.
+### Key Components & State Flow
+1. **API Client (`api.js`)**: Encapsulates `fetch` calls, handles URL query serialization, and uniformly parses RFC 9457 Problem Details (`detail` or `title` attributes) while gracefully handling HTTP 204 No Content.
+2. **Projects Column**: Lists projects from `GET /api/v1/projects` with loading state, error retry banner, empty state, and active project selection.
+3. **Project Detail & Telemetry**: Displays selected project title, description, and status metrics (`total_tasks`, `todo`, `in_progress`, `done`) fetched from `GET /api/v1/projects/{id}/summary`.
+4. **Task Lifecycle Management**:
+   - **Creation**: Form with title, priority (`low`, `medium`, `high`), and status (`todo`, `in_progress`, `done`), backed by client validation.
+   - **Status Transitions**: Checkbox toggle (`todo <-> done`) and status selector dropdown for direct lifecycle progression.
+   - **Inline Editing**: Inline form to modify task title, priority, and status with Save and Cancel controls.
+   - **Deletion**: Immediate removal via `DELETE /api/v1/tasks/{id}` with automatic summary count refresh.
+5. **Reactive Filters**: Dropdown filters for status and priority, combined with live text search matching title and description.
 
 ---
 
 ## 6. Database Strategy & Migrations
 
-- **Engine**: SQLite is selected for initial development simplicity, zero network overhead, and portability across local and CI environments.
-- **Concurrency**: `check_same_thread=False` is enabled in `database.py` for multithreaded request handling in FastAPI.
-- **Migrations**: Alembic tracks schema changes in `migrations/versions/`. Migrations can be applied using:
-  ```bash
-  alembic upgrade head
-  ```
+- **Dual-Dialect Support**: Models utilize dialect-neutral SQLAlchemy types (`String`, `DateTime`, `Uuid`, `CheckConstraint`) supported seamlessly across PostgreSQL (production/docker) and SQLite (testing/local development).
+- **Concurrency & WAL Mode**: SQLite runs with `check_same_thread=False` for concurrent local development. PostgreSQL in Docker Compose handles production concurrent transactions.
+- **Dedicated Migration Service**: `docker-compose.yml` runs migrations via a dedicated, one-off container (`migration`) that exits before API replicas boot, preventing concurrent migration race conditions.
 
 ---
 
-## 7. Docker & Container Strategy
+## 7. Containerization & Production Strategy
 
-- **Backend Container**: Python 3.12 slim base image, non-root user execution, port 8000 exposed with healthcheck.
-- **Frontend Container**: Multi-stage build (Node build -> Nginx or lightweight preview server), port 5173/80 exposed.
-- **Docker Compose**: Orchestrates both services with volume mounts for live reload during development.
+- **Backend Container (`backend/Dockerfile`)**:
+  - Multi-stage build based on `python:3.12-slim`.
+  - Isolate build dependencies in builder stage; copies only `/opt/venv` to final runner.
+  - Runs under unprivileged system user `taskflow` (`uid: 10001`).
+- **Frontend Container (`frontend/Dockerfile`)**:
+  - Multi-stage build based on `node:22-alpine` compiling static assets via `npm run build`.
+  - Production runner uses `nginx:1.27-alpine` serving static assets with gzip compression, SPA fallback routing (`try_files $uri /index.html`), and immutable cache headers.
+- **Docker Compose Stack (`docker-compose.yml`)**:
+  - `postgres`: PostgreSQL 16 on port 5432 with health check and persistent volume.
+  - `redis`: Redis 7 on port 6379 with health check and persistent volume.
+  - `migration`: Dedicated migration runner (`alembic upgrade head`).
+  - `api`: FastAPI application dependent on healthy postgres, redis, and finished migrations.
+  - `web`: Nginx frontend reverse proxy on port 5173.
+  - `worker`: Optional background worker profile.
 
 ---
 
-## 8. 7-Day Sprint Roadmap
+## 8. Sprint Roadmap & Milestone Status
 
-- **Day 0**: Repository and environment setup, baseline health endpoints, CI pipeline, Docker configuration, and documentation templates.
-- **Day 1**: User models, password hashing, and authentication endpoints.
-- **Day 2**: Task models, CRUD endpoints, and Alembic migrations.
-- **Day 3**: Frontend UI components, auth state management, and task dashboard.
-- **Day 4**: Advanced filtering, search, sorting, and optimistic UI updates.
-- **Day 5**: Automated test coverage, integration tests, and security hardening.
-- **Day 6**: Container optimization, production builds, and CI/CD validation.
-- **Day 7**: Retrospective, performance benchmarking, and final release review.
+- [x] **Day 0**: Repository and environment setup, baseline health endpoints, CI pipeline, and Docker foundation.
+- [x] **Day 1**: User models, password hashing, and authentication endpoints.
+- [x] **Day 2**: Task models, CRUD endpoints, and Alembic migrations.
+- [x] **Day 3**: Models, migrations, seed benchmarks, and projects API.
+- [x] **Day 4**: Scalability, Redis caching, background jobs, rate limiting, and resilience.
+- [x] **Day 5**: Production engineering practices, multi-tier testing, containerization, and CI/CD security.
+- [x] **Day 6**: Tasks REST API, status lifecycle enforcement, frontend project & task integration, and RTL test suite.
+- [ ] **Day 7**: Retrospective, performance benchmarking, and final release review.
