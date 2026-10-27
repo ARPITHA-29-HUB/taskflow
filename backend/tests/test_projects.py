@@ -1,14 +1,15 @@
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.main import app
 from app.database import Base, get_db
-from app.models.user import User
+from app.main import app
 from app.models.project import Project
+from app.models.user import User
 
 # Setup an isolated in-memory SQLite engine for tests
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -36,6 +37,7 @@ def db_session():
 @pytest.fixture(scope="function")
 def client(db_session):
     """Override get_db with test database session."""
+
     def override_get_db():
         try:
             yield db_session
@@ -111,8 +113,8 @@ def test_list_projects_pagination(client, sample_user, db_session):
         proj = Project(
             id=uuid.uuid4(),
             user_id=sample_user.id,
-            name=f"Project {i+1}",
-            description=f"Desc {i+1}",
+            name=f"Project {i + 1}",
+            description=f"Desc {i + 1}",
         )
         db_session.add(proj)
     db_session.commit()

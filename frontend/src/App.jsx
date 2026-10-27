@@ -31,6 +31,7 @@ function App() {
 
   // Interactive demo tasks
   const [tasks, setTasks] = useState(INITIAL_TASKS)
+  const [filter, setFilter] = useState('all')
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState('medium')
 
@@ -108,6 +109,12 @@ function App() {
   }
 
   const completedCount = tasks.filter(t => t.completed).length
+
+  const filteredTasks = tasks.filter(t => {
+    if (filter === 'active') return !t.completed
+    if (filter === 'completed') return t.completed
+    return true
+  })
 
   return (
     <div className="app-container">
@@ -204,9 +211,22 @@ function App() {
           <div className="card">
             <div className="card-header">
               <h2 className="card-title">Task Sandbox</h2>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                {completedCount} / {tasks.length} Completed
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <select
+                  className="task-input"
+                  style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.8rem', cursor: 'pointer' }}
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  aria-label="Filter tasks"
+                >
+                  <option value="all">All Tasks</option>
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                </select>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  {completedCount} / {tasks.length} Completed
+                </span>
+              </div>
             </div>
 
             <form className="task-form" onSubmit={handleAddTask}>
@@ -233,34 +253,42 @@ function App() {
             </form>
 
             <div className="task-list">
-              {tasks.map((task) => (
-                <div key={task.id} className="task-item">
-                  <div className="task-left">
-                    <input
-                      type="checkbox"
-                      className="task-checkbox"
-                      checked={task.completed}
-                      onChange={() => toggleTask(task.id)}
-                    />
-                    <span className={`task-title ${task.completed ? 'done' : ''}`}>
-                      {task.title}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span className={`priority-tag priority-${task.priority}`}>
-                      {task.priority}
-                    </span>
-                    <button
-                      type="button"
-                      className="delete-btn"
-                      onClick={() => deleteTask(task.id)}
-                      title="Delete task"
-                    >
-                      ✕
-                    </button>
-                  </div>
+              {filteredTasks.length === 0 ? (
+                <div className="task-empty-state" data-testid="task-empty-state">
+                  No tasks found.
                 </div>
-              ))}
+              ) : (
+                filteredTasks.map((task) => (
+                  <div key={task.id} className="task-item">
+                    <div className="task-left">
+                      <input
+                        type="checkbox"
+                        className="task-checkbox"
+                        checked={task.completed}
+                        onChange={() => toggleTask(task.id)}
+                        aria-label={`Toggle ${task.title}`}
+                      />
+                      <span className={`task-title ${task.completed ? 'done' : ''}`}>
+                        {task.title}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className={`priority-tag priority-${task.priority}`}>
+                        {task.priority}
+                      </span>
+                      <button
+                        type="button"
+                        className="delete-btn"
+                        onClick={() => deleteTask(task.id)}
+                        title="Delete task"
+                        aria-label={`Delete ${task.title}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </section>

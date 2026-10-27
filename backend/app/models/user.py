@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime, timezone
-from typing import List, TYPE_CHECKING
-from sqlalchemy import String, Boolean, DateTime, Uuid
+from typing import TYPE_CHECKING, List
+
+from sqlalchemy import Boolean, DateTime, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
 
 if TYPE_CHECKING:
@@ -12,6 +14,7 @@ if TYPE_CHECKING:
 
 class User(Base):
     """User account model for authentication and data ownership."""
+
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

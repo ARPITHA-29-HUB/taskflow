@@ -292,6 +292,16 @@
   overflow-y: auto;
 }
 
+.task-empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
 .task-item {
   display: flex;
   align-items: center;

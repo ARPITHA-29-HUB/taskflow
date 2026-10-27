@@ -3,4 +3,9 @@ dist/
 dist-ssr/
 .git
 .gitignore
+.dockerignore
 *.local
+.env
+.env.*
+.vscode/
+.idea/

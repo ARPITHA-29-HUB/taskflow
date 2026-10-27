@@ -1,8 +1,15 @@
 from app.schemas.project import (
     ProjectCreate,
-    ProjectUpdate,
-    ProjectResponse,
     ProjectListResponse,
+    ProjectResponse,
+    ProjectSummaryResponse,
+    ProjectUpdate,
+)
+from app.schemas.task import (
+    TaskCreate,
+    TaskListResponse,
+    TaskResponse,
+    TaskUpdate,
 )
 
 __all__ = [
@@ -10,4 +17,9 @@ __all__ = [
     "ProjectUpdate",
     "ProjectResponse",
     "ProjectListResponse",
+    "ProjectSummaryResponse",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskResponse",
+    "TaskListResponse",
 ]
