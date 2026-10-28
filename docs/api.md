@@ -46,6 +46,33 @@ Returns service health telemetry, database status, and API version.
 
 ---
 
+### 1.3 Database Readiness Probe
+Performs an active database ping (`SELECT 1`) to verify that relational storage is reachable and ready to process traffic.
+
+- **Method**: `GET`
+- **Path**: `/ready`
+- **Authentication**: None required
+
+#### Response (200 OK)
+```json
+{
+  "status": "ready",
+  "database": "connected"
+}
+```
+
+#### Error Response (503 Service Unavailable)
+Returned if database connectivity fails or timeout is exceeded:
+```json
+{
+  "status": "unavailable",
+  "database": "disconnected",
+  "error": "database connection error details"
+}
+```
+
+---
+
 ## 2. Authentication & Users
 
 ### 2.1 Register New User
@@ -238,31 +265,69 @@ Utilizes Cache-Aside with a 60-second TTL and automatic database fallback.
 
 ---
 
+### 3.5 Create Task within Project
+Creates a new task scoped directly to a specified project ID. Enforces rate limiting (30 requests/minute per client IP) and schedules an in-process background reminder if `due_date` is supplied.
+
+- **Method**: `POST`
+- **Path**: `/api/v1/projects/{project_id}/tasks`
+- **Authentication**: None required (v1 pre-auth baseline)
+
+#### Request Body
+```json
+{
+  "title": "Setup Nginx Reverse Proxy",
+  "description": "Configure client routing and immutable static asset cache headers",
+  "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+  "status": "todo",
+  "priority": "high",
+  "due_date": "2026-10-30T15:00:00Z"
+}
+```
+
+#### Response (201 Created)
+```json
+{
+  "id": "e5d0e422-67b0-4d58-a827-446259125741",
+  "title": "Setup Nginx Reverse Proxy",
+  "description": "Configure client routing and immutable static asset cache headers",
+  "status": "todo",
+  "priority": "high",
+  "due_date": "2026-10-30T15:00:00Z",
+  "created_at": "2026-10-27T10:00:00Z",
+  "updated_at": "2026-10-27T10:00:00Z",
+  "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+  "project_id": "e1d188bd-6d28-486f-acce-fa30898e986b"
+}
+```
+
+---
+
 ## 4. Task Management (User Scoped)
 
-All task endpoints require an authenticated user (`Authorization: Bearer <token>`). Queries are strictly isolated to the authenticated user's tasks.
+All task endpoints manage tasks owned by users. In the current pre-auth v1 baseline, `user_id` is supplied explicitly in creation payloads and query filters; upon JWT integration, requests will be authenticated via `Authorization: Bearer <token>` and scoped to the bearer subject.
 
 ### 4.1 List Tasks (Paginated & Filtered)
-Retrieves a paginated list of tasks belonging to the authenticated user.
+Retrieves a paginated list of tasks, with support for status, priority, and text search filtering.
 
 - **Method**: `GET`
 - **Path**: `/api/v1/tasks`
-- **Authentication**: Bearer JWT
 - **Query Parameters**:
   | Parameter | Type | Default | Description |
   | :--- | :--- | :--- | :--- |
   | `limit` | integer | `20` | Max items to return (1 - 100) |
-  | `offset` | integer | `0` | Number of records to skip |
+  | `offset` | integer | `0` | Number of records to skip (≥ 0) |
   | `status` | string | `null` | Filter by status (`todo`, `in_progress`, `done`) |
   | `priority` | string | `null` | Filter by priority (`low`, `medium`, `high`) |
   | `search` | string | `null` | Substring match against title or description |
+  | `project_id`| UUID | `null` | Filter by associated project ID |
+  | `user_id` | UUID | `null` | Filter by task owner user ID |
 
 #### Response (200 OK) — Paginated Envelope
 ```json
 {
   "items": [
     {
-      "id": 1,
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "title": "Design Database Schema",
       "description": "Create initial User and Task tables using SQLAlchemy",
       "status": "in_progress",
@@ -270,7 +335,8 @@ Retrieves a paginated list of tasks belonging to the authenticated user.
       "due_date": "2026-10-25T18:00:00Z",
       "created_at": "2026-10-22T10:00:00Z",
       "updated_at": "2026-10-22T10:30:00Z",
-      "user_id": 1
+      "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+      "project_id": "e5d0e422-67b0-4d58-a827-446259125741"
     }
   ],
   "total": 1,
@@ -282,17 +348,18 @@ Retrieves a paginated list of tasks belonging to the authenticated user.
 ---
 
 ### 4.2 Create Task
-Creates a new task owned by the authenticated user.
+Creates a new task. If `due_date` is specified, an asynchronous background reminder is scheduled. If `project_id` is associated, the project's summary cache is automatically invalidated.
 
 - **Method**: `POST`
 - **Path**: `/api/v1/tasks`
-- **Authentication**: Bearer JWT
 
 #### Request Body
 ```json
 {
   "title": "Write Pytest Suite",
   "description": "Add unit and integration tests for task endpoints",
+  "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+  "project_id": "e5d0e422-67b0-4d58-a827-446259125741",
   "status": "todo",
   "priority": "medium",
   "due_date": "2026-10-26T12:00:00Z"
@@ -302,7 +369,7 @@ Creates a new task owned by the authenticated user.
 #### Response (201 Created)
 ```json
 {
-  "id": 2,
+  "id": "7b8c9d0e-1f2a-3b4c-5d6e-7f8a9b0c1d2e",
   "title": "Write Pytest Suite",
   "description": "Add unit and integration tests for task endpoints",
   "status": "todo",
@@ -310,23 +377,23 @@ Creates a new task owned by the authenticated user.
   "due_date": "2026-10-26T12:00:00Z",
   "created_at": "2026-10-22T11:00:00Z",
   "updated_at": "2026-10-22T11:00:00Z",
-  "user_id": 1
+  "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+  "project_id": "e5d0e422-67b0-4d58-a827-446259125741"
 }
 ```
 
 ---
 
 ### 4.3 Get Task by ID
-Retrieves details of a single task.
+Retrieves details of a single task by UUID.
 
 - **Method**: `GET`
 - **Path**: `/api/v1/tasks/{id}`
-- **Authentication**: Bearer JWT
 
 #### Response (200 OK)
 ```json
 {
-  "id": 1,
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "title": "Design Database Schema",
   "description": "Create initial User and Task tables using SQLAlchemy",
   "status": "in_progress",
@@ -334,18 +401,18 @@ Retrieves details of a single task.
   "due_date": "2026-10-25T18:00:00Z",
   "created_at": "2026-10-22T10:00:00Z",
   "updated_at": "2026-10-22T10:30:00Z",
-  "user_id": 1
+  "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+  "project_id": "e5d0e422-67b0-4d58-a827-446259125741"
 }
 ```
 
 ---
 
 ### 4.4 Update Task
-Updates fields on an existing task. Partial updates are supported.
+Updates fields on an existing task. Both `PUT` and `PATCH` methods are supported for partial updates. Validates task status transitions (`todo <-> in_progress <-> done`) and invalidates project summary caches when modifying project tasks.
 
-- **Method**: `PUT` (or `PATCH`)
+- **Method**: `PUT` or `PATCH`
 - **Path**: `/api/v1/tasks/{id}`
-- **Authentication**: Bearer JWT
 
 #### Request Body
 ```json
@@ -358,7 +425,7 @@ Updates fields on an existing task. Partial updates are supported.
 #### Response (200 OK)
 ```json
 {
-  "id": 1,
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "title": "Design Database Schema",
   "description": "Create initial User and Task tables using SQLAlchemy",
   "status": "done",
@@ -366,18 +433,18 @@ Updates fields on an existing task. Partial updates are supported.
   "due_date": "2026-10-25T18:00:00Z",
   "created_at": "2026-10-22T10:00:00Z",
   "updated_at": "2026-10-22T11:15:00Z",
-  "user_id": 1
+  "user_id": "c1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c",
+  "project_id": "e5d0e422-67b0-4d58-a827-446259125741"
 }
 ```
 
 ---
 
 ### 4.5 Delete Task
-Permanently deletes a task belonging to the authenticated user.
+Permanently deletes a task by UUID and evicts any associated project summary cache.
 
 - **Method**: `DELETE`
 - **Path**: `/api/v1/tasks/{id}`
-- **Authentication**: Bearer JWT
 
 #### Response (204 No Content)
 *Empty response body.*
@@ -400,21 +467,36 @@ TaskFlow adheres to the **RFC 9457 standard** (`application/problem+json`) for a
 ```
 
 ### 5.1 Example: 404 Resource Not Found
-Returned when the requested task ID does not exist or does not belong to the user.
+Returned when the requested task or project ID does not exist in the database.
 
 ```json
 {
   "type": "https://taskflow.dev/errors/not-found",
   "title": "Resource Not Found",
   "status": 404,
-  "detail": "Task with ID 99 was not found or does not belong to you",
-  "instance": "/api/v1/tasks/99"
+  "detail": "Task with ID '3fa85f64-5717-4562-b3fc-2c963f66afa6' was not found.",
+  "instance": "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
 }
 ```
 
 ---
 
-### 5.2 Example: 401 Unauthorized
+### 5.2 Example: 400 Bad Request (Invalid Status Transition)
+Returned when attempting an illegal task status transition in violation of the domain state machine (`todo <-> in_progress <-> done`).
+
+```json
+{
+  "type": "https://taskflow.dev/errors/invalid-transition",
+  "title": "Invalid Status Transition",
+  "status": 400,
+  "detail": "Cannot transition task status from 'done' to 'archived'.",
+  "instance": "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+}
+```
+
+---
+
+### 5.3 Example: 401 Unauthorized
 Returned when a request is missing an `Authorization` header or presents an expired/invalid JWT.
 
 ```json
@@ -429,7 +511,7 @@ Returned when a request is missing an `Authorization` header or presents an expi
 
 ---
 
-### 5.3 Example: 422 Unprocessable Content (Validation Error)
+### 5.4 Example: 422 Unprocessable Content (Validation Error)
 Returned when request parameters or payload fail Pydantic schema validation.
 
 ```json

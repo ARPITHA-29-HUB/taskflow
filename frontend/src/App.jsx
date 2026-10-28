@@ -1,53 +1,73 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import './App.css'
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
-const INITIAL_TASKS = [
-  { id: 1, title: 'Inspect existing repository setup', priority: 'high', completed: true },
-  { id: 2, title: 'Configure FastAPI endpoints and tests', priority: 'high', completed: true },
-  { id: 3, title: 'Initialize Alembic and SQLite migrations', priority: 'medium', completed: true },
-  { id: 4, title: 'Setup GitHub Actions CI pipeline', priority: 'medium', completed: true },
-  { id: 5, title: 'Day 1: Implement user authentication and models', priority: 'low', completed: false },
-]
+import {
+  API_BASE_URL,
+  fetchHealth,
+  fetchProjects,
+  fetchProjectSummary,
+  fetchTasks,
+  createTask,
+  updateTask,
+  deleteTask,
+} from './api'
 
 const ROADMAP_STEPS = [
-  { day: 'Day 0', title: 'Repository & Environment Setup', desc: 'FastAPI, React/Vite, SQLite, Alembic, Docker, CI.', active: true, done: true },
-  { day: 'Day 1', title: 'Data Models & Auth', desc: 'User & Task SQLAlchemy models, JWT auth endpoints.', active: false, done: false },
-  { day: 'Day 2', title: 'Task CRUD Operations', desc: 'REST endpoints for creating, updating, and filtering tasks.', active: false, done: false },
-  { day: 'Day 3', title: 'Interactive Frontend', desc: 'React components for task boards and user login.', active: false, done: false },
-  { day: 'Day 4', title: 'Advanced Filtering & State', desc: 'Search, tag filters, sorting, and optimistic UI updates.', active: false, done: false },
-  { day: 'Day 5', title: 'Testing & Hardening', desc: 'E2E testing, backend test coverage, and security audit.', active: false, done: false },
-  { day: 'Day 6', title: 'Dockerization & Deployment', desc: 'Multi-stage Docker compose & production readiness.', active: false, done: false },
+  { day: 'Day 0', title: 'Repository & Environment Setup', desc: 'FastAPI, React/Vite, SQLite, Alembic, Docker, CI.', active: false, done: true },
+  { day: 'Day 1', title: 'Data Models & Auth', desc: 'User & Task SQLAlchemy models, JWT auth endpoints.', active: false, done: true },
+  { day: 'Day 2', title: 'Task CRUD Operations', desc: 'REST endpoints for creating, updating, and filtering tasks.', active: false, done: true },
+  { day: 'Day 3', title: 'Interactive Frontend', desc: 'React components for task boards and user login.', active: false, done: true },
+  { day: 'Day 4', title: 'Advanced Filtering & State', desc: 'Search, tag filters, sorting, and optimistic UI updates.', active: false, done: true },
+  { day: 'Day 5', title: 'Testing & Hardening', desc: 'E2E testing, backend test coverage, and security audit.', active: false, done: true },
+  { day: 'Day 6', title: 'Full-Stack Integration', desc: 'FastAPI REST API, project views, task lifecycle & RTL suite.', active: true, done: true },
   { day: 'Day 7', title: 'Review & Retrospective', desc: 'Final polish, documentation walkthrough, and demo release.', active: false, done: false },
 ]
 
 function App() {
-  // Health check state
+  // Backend health connectivity state
   const [healthData, setHealthData] = useState(null)
   const [healthLoading, setHealthLoading] = useState(false)
   const [healthError, setHealthError] = useState(null)
   const [latency, setLatency] = useState(null)
 
-  // Interactive demo tasks
-  const [tasks, setTasks] = useState(INITIAL_TASKS)
-  const [filter, setFilter] = useState('all')
+  // Projects state
+  const [projects, setProjects] = useState([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
+  const [projectsError, setProjectsError] = useState(null)
+  const [selectedProjectId, setSelectedProjectId] = useState(null)
+
+  // Selected project tasks & summary
+  const [tasks, setTasks] = useState([])
+  const [tasksLoading, setTasksLoading] = useState(false)
+  const [tasksError, setTasksError] = useState(null)
+  const [summary, setSummary] = useState(null)
+
+  // Filter controls
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [priorityFilter, setPriorityFilter] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Task creation form
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState('medium')
+  const [newTaskStatus, setNewTaskStatus] = useState('todo')
+  const [taskSubmitting, setTaskSubmitting] = useState(false)
+  const [validationError, setValidationError] = useState(null)
+
+  // Task editing state
+  const [editingTaskId, setEditingTaskId] = useState(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editPriority, setEditPriority] = useState('medium')
+  const [editStatus, setEditStatus] = useState('todo')
+
+  const selectedProject = projects.find((p) => p.id === selectedProjectId) || null
 
   const checkHealth = async () => {
     setHealthLoading(true)
     setHealthError(null)
     const startTime = performance.now()
     try {
-      const response = await fetch(`${API_BASE_URL}/health`)
-      const elapsed = Math.round(performance.now() - startTime)
-      setLatency(elapsed)
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} - ${response.statusText}`)
-      }
-      const data = await response.json()
+      const data = await fetchHealth()
+      setLatency(Math.round(performance.now() - startTime))
       setHealthData(data)
     } catch (err) {
       setHealthError(err.message || 'Unable to connect to backend')
@@ -57,64 +77,219 @@ function App() {
     }
   }
 
+  // Initial health check on mount
   useEffect(() => {
     let active = true
-
-    const fetchInitialHealth = async () => {
+    const checkInitial = async () => {
       const startTime = performance.now()
       try {
-        const response = await fetch(`${API_BASE_URL}/health`)
-        const elapsed = Math.round(performance.now() - startTime)
+        const data = await fetchHealth()
         if (!active) return
-
-        setLatency(elapsed)
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status} - ${response.statusText}`)
-        }
-        const data = await response.json()
+        setLatency(Math.round(performance.now() - startTime))
         setHealthData(data)
       } catch (err) {
-        if (active) {
-          setHealthError(err.message || 'Unable to connect to backend')
-        }
+        if (active) setHealthError(err.message || 'Unable to connect to backend')
       }
     }
-
-    fetchInitialHealth()
-
+    checkInitial()
     return () => {
       active = false
     }
   }, [])
 
-  const handleAddTask = (e) => {
-    e.preventDefault()
-    if (!newTaskTitle.trim()) return
-    const newTask = {
-      id: Date.now(),
-      title: newTaskTitle.trim(),
-      priority: newTaskPriority,
-      completed: false,
+  // Load projects list
+  const loadProjects = async () => {
+    setProjectsLoading(true)
+    setProjectsError(null)
+    try {
+      const data = await fetchProjects({ limit: 50 })
+      const items = data?.items || []
+      setProjects(items)
+      if (items.length > 0) {
+        setSelectedProjectId((prev) => (prev && items.some((p) => p.id === prev) ? prev : items[0].id))
+      } else {
+        setSelectedProjectId(null)
+      }
+    } catch (err) {
+      setProjectsError(err.message || 'Failed to load projects')
+    } finally {
+      setProjectsLoading(false)
     }
-    setTasks([newTask, ...tasks])
-    setNewTaskTitle('')
   }
 
-  const toggleTask = (id) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t))
+  useEffect(() => {
+    let active = true
+    const fetchInitialProjects = async () => {
+      try {
+        const data = await fetchProjects({ limit: 50 })
+        if (!active) return
+        const items = data?.items || []
+        setProjects(items)
+        if (items.length > 0) {
+          setSelectedProjectId((prev) => (prev && items.some((p) => p.id === prev) ? prev : items[0].id))
+        } else {
+          setSelectedProjectId(null)
+        }
+      } catch (err) {
+        if (active) setProjectsError(err.message || 'Failed to load projects')
+      } finally {
+        if (active) setProjectsLoading(false)
+      }
+    }
+    fetchInitialProjects()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  // Fetch tasks and summary when selected project or filters change
+  const refreshProjectData = useCallback(async () => {
+    if (!selectedProjectId) return
+    const params = {
+      project_id: selectedProjectId,
+      status: statusFilter !== 'all' ? statusFilter : undefined,
+      priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+      search: searchQuery.trim() || undefined,
+    }
+    try {
+      const [taskData, summaryData] = await Promise.all([
+        fetchTasks(params),
+        fetchProjectSummary(selectedProjectId).catch(() => null),
+      ])
+      setTasks(taskData?.items || [])
+      if (summaryData) setSummary(summaryData)
+    } catch (err) {
+      setTasksError(err.message || 'Failed to load tasks')
+    }
+  }, [selectedProjectId, statusFilter, priorityFilter, searchQuery])
+
+  useEffect(() => {
+    if (!selectedProjectId) return
+
+    let active = true
+
+    const params = {
+      project_id: selectedProjectId,
+      status: statusFilter !== 'all' ? statusFilter : undefined,
+      priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+      search: searchQuery.trim() || undefined,
+    }
+
+    Promise.all([
+      fetchTasks(params),
+      fetchProjectSummary(selectedProjectId).catch(() => null),
+    ])
+      .then(([taskData, summaryData]) => {
+        if (!active) return
+        setTasks(taskData?.items || [])
+        if (summaryData) setSummary(summaryData)
+      })
+      .catch((err) => {
+        if (!active) return
+        setTasksError(err.message || 'Failed to load tasks')
+      })
+      .finally(() => {
+        if (active) setTasksLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [selectedProjectId, statusFilter, priorityFilter, searchQuery])
+
+  // Task creation handler
+  const handleCreateTask = async (e) => {
+    e.preventDefault()
+    if (!newTaskTitle.trim()) {
+      setValidationError('Task title is required.')
+      return
+    }
+    if (!selectedProject) {
+      setValidationError('Please select a project first.')
+      return
+    }
+
+    setTaskSubmitting(true)
+    setValidationError(null)
+    try {
+      await createTask({
+        title: newTaskTitle.trim(),
+        priority: newTaskPriority,
+        status: newTaskStatus,
+        project_id: selectedProject.id,
+        user_id: selectedProject.user_id,
+      })
+      setNewTaskTitle('')
+      await refreshProjectData()
+    } catch (err) {
+      setValidationError(err.message || 'Failed to create task')
+    } finally {
+      setTaskSubmitting(false)
+    }
   }
 
-  const deleteTask = (id) => {
-    setTasks(tasks.filter(t => t.id !== id))
+  // Status toggle handler
+  const handleToggleTaskStatus = async (task) => {
+    const nextStatus = task.status === 'done' ? 'todo' : 'done'
+    try {
+      await updateTask(task.id, { status: nextStatus })
+      await refreshProjectData()
+    } catch (err) {
+      setTasksError(err.message || 'Failed to update task status')
+    }
   }
 
-  const completedCount = tasks.filter(t => t.completed).length
+  // Direct status change handler
+  const handleChangeStatus = async (taskId, nextStatus) => {
+    try {
+      await updateTask(taskId, { status: nextStatus })
+      await refreshProjectData()
+    } catch (err) {
+      setTasksError(err.message || 'Failed to update task status')
+    }
+  }
 
-  const filteredTasks = tasks.filter(t => {
-    if (filter === 'active') return !t.completed
-    if (filter === 'completed') return t.completed
-    return true
-  })
+  // Edit task handlers
+  const startEdit = (task) => {
+    setEditingTaskId(task.id)
+    setEditTitle(task.title)
+    setEditPriority(task.priority)
+    setEditStatus(task.status)
+    setValidationError(null)
+  }
+
+  const cancelEdit = () => {
+    setEditingTaskId(null)
+  }
+
+  const handleSaveEdit = async (e, taskId) => {
+    e.preventDefault()
+    if (!editTitle.trim()) {
+      setValidationError('Task title cannot be empty.')
+      return
+    }
+    try {
+      await updateTask(taskId, {
+        title: editTitle.trim(),
+        priority: editPriority,
+        status: editStatus,
+      })
+      setEditingTaskId(null)
+      await refreshProjectData()
+    } catch (err) {
+      setValidationError(err.message || 'Failed to save task edits')
+    }
+  }
+
+  // Task deletion handler
+  const handleDeleteTask = async (taskId) => {
+    try {
+      await deleteTask(taskId)
+      await refreshProjectData()
+    } catch (err) {
+      setTasksError(err.message || 'Failed to delete task')
+    }
+  }
 
   return (
     <div className="app-container">
@@ -126,7 +301,7 @@ function App() {
         </div>
 
         <div className="nav-badges">
-          <span className="phase-badge">Day 0: Setup Ready</span>
+          <span className="phase-badge">Day 6: Integrated</span>
           <div className="status-pill">
             <span className={`dot ${healthData ? 'dot-green' : healthError ? 'dot-red' : 'dot-yellow'}`} />
             <span>{healthData ? 'API Online' : healthError ? 'API Offline' : 'Connecting...'}</span>
@@ -134,22 +309,20 @@ function App() {
         </div>
       </header>
 
-      {/* Hero */}
+      {/* Main Content */}
       <main>
         <section className="hero">
-          <span className="hero-tag">Full-Stack Development Sprint</span>
+          <span className="hero-tag">Day 6 • Full-Stack Workspace</span>
           <h1 className="hero-title">
             Task Orchestration <span>Engine</span>
           </h1>
           <p className="hero-desc">
-            Full-stack task management architecture powered by FastAPI, SQLite, and React with Vite.
-            Repository environment initialized and ready for feature implementation.
+            Production task and project orchestration connected to FastAPI and PostgreSQL.
           </p>
         </section>
 
-        {/* Dashboard Grid */}
-        <section className="dashboard-grid">
-          {/* API Health Inspector */}
+        {/* Backend Health Inspector */}
+        <section style={{ marginBottom: '2rem' }}>
           <div className="card">
             <div className="card-header">
               <h2 className="card-title">Backend Connectivity</h2>
@@ -183,113 +356,320 @@ function App() {
                   `Status: Connection Failed\nError: ${healthError}\n\nTip: Start the backend server using:\n  uvicorn app.main:app --reload`
                 )}
               </pre>
-
-              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
-                <a
-                  href={`${API_BASE_URL}/docs`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn btn-secondary"
-                  style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
-                >
-                  Interactive Swagger Docs ↗
-                </a>
-                <a
-                  href={`${API_BASE_URL}/health`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn btn-secondary"
-                  style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
-                >
-                  Raw /health ↗
-                </a>
-              </div>
             </div>
           </div>
+        </section>
 
-          {/* Interactive Tasks Sandbox */}
+        {/* Dashboard Grid: Left Projects, Right Tasks */}
+        <section className="dashboard-grid">
+          {/* Projects Column */}
           <div className="card">
             <div className="card-header">
-              <h2 className="card-title">Task Sandbox</h2>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <select
-                  className="task-input"
-                  style={{ width: 'auto', padding: '0.35rem 0.65rem', fontSize: '0.8rem', cursor: 'pointer' }}
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  aria-label="Filter tasks"
-                >
-                  <option value="all">All Tasks</option>
-                  <option value="active">Active</option>
-                  <option value="completed">Completed</option>
-                </select>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  {completedCount} / {tasks.length} Completed
+              <h2 className="card-title">
+                Projects
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 400 }}>
+                  ({projects.length})
                 </span>
+              </h2>
+            </div>
+
+            {projectsLoading && (
+              <div className="task-empty-state" data-testid="projects-loading">
+                Loading projects...
               </div>
-            </div>
+            )}
 
-            <form className="task-form" onSubmit={handleAddTask}>
-              <input
-                type="text"
-                className="task-input"
-                placeholder="Create new task..."
-                value={newTaskTitle}
-                onChange={(e) => setNewTaskTitle(e.target.value)}
-              />
-              <select
-                className="task-input"
-                style={{ width: 'auto', cursor: 'pointer' }}
-                value={newTaskPriority}
-                onChange={(e) => setNewTaskPriority(e.target.value)}
-              >
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
-              <button type="submit" className="btn btn-primary" style={{ padding: '0.65rem 1rem' }}>
-                Add
-              </button>
-            </form>
+            {projectsError && (
+              <div className="error-banner" role="alert">
+                Failed to load projects: {projectsError}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ marginLeft: '0.75rem', padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                  onClick={loadProjects}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
 
-            <div className="task-list">
-              {filteredTasks.length === 0 ? (
-                <div className="task-empty-state" data-testid="task-empty-state">
-                  No tasks found.
+            {!projectsLoading && !projectsError && projects.length === 0 && (
+              <div className="task-empty-state" data-testid="project-empty-state">
+                No projects found.
+              </div>
+            )}
+
+            {!projectsLoading && projects.length > 0 && (
+              <div className="project-list" role="list">
+                {projects.map((project) => (
+                  <button
+                    type="button"
+                    key={project.id}
+                    className={`project-item ${selectedProjectId === project.id ? 'active' : ''}`}
+                    onClick={() => setSelectedProjectId(project.id)}
+                    aria-label={`Select project ${project.name}`}
+                  >
+                    <div className="project-item-header">
+                      <span className="project-item-name">{project.name}</span>
+                      {selectedProjectId === project.id && (
+                        <span className="active-pill">Selected</span>
+                      )}
+                    </div>
+                    {project.description && (
+                      <p className="project-item-desc">{project.description}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Project Details & Tasks Column */}
+          <div className="card">
+            {!selectedProject ? (
+              <div className="task-empty-state">
+                Select a project from the left panel to inspect tasks.
+              </div>
+            ) : (
+              <div>
+                {/* Project Header & Summary Stats */}
+                <div className="project-detail-header">
+                  <h2 className="project-detail-title">{selectedProject.name}</h2>
+                  {selectedProject.description && (
+                    <p className="project-detail-desc">{selectedProject.description}</p>
+                  )}
+                  {summary && (
+                    <div className="summary-stats">
+                      <span className="summary-stat">Total: <strong>{summary.total_tasks}</strong></span>
+                      <span className="summary-stat">Todo: <strong>{summary.todo}</strong></span>
+                      <span className="summary-stat">In Progress: <strong>{summary.in_progress}</strong></span>
+                      <span className="summary-stat">Done: <strong>{summary.done}</strong></span>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                filteredTasks.map((task) => (
-                  <div key={task.id} className="task-item">
-                    <div className="task-left">
-                      <input
-                        type="checkbox"
-                        className="task-checkbox"
-                        checked={task.completed}
-                        onChange={() => toggleTask(task.id)}
-                        aria-label={`Toggle ${task.title}`}
-                      />
-                      <span className={`task-title ${task.completed ? 'done' : ''}`}>
-                        {task.title}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span className={`priority-tag priority-${task.priority}`}>
-                        {task.priority}
-                      </span>
-                      <button
-                        type="button"
-                        className="delete-btn"
-                        onClick={() => deleteTask(task.id)}
-                        title="Delete task"
-                        aria-label={`Delete ${task.title}`}
-                      >
-                        ✕
-                      </button>
-                    </div>
+
+                {/* Filter Controls Bar */}
+                <div className="filter-bar">
+                  <select
+                    className="task-input filter-select"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    aria-label="Filter tasks by status"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="todo">Todo</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="done">Done</option>
+                  </select>
+
+                  <select
+                    className="task-input filter-select"
+                    value={priorityFilter}
+                    onChange={(e) => setPriorityFilter(e.target.value)}
+                    aria-label="Filter tasks by priority"
+                  >
+                    <option value="all">All Priorities</option>
+                    <option value="high">High Priority</option>
+                    <option value="medium">Medium Priority</option>
+                    <option value="low">Low Priority</option>
+                  </select>
+
+                  <input
+                    type="text"
+                    className="task-input search-input"
+                    placeholder="Search tasks..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    aria-label="Search tasks"
+                  />
+                </div>
+
+                {/* Task Creation Form */}
+                <form className="task-form" onSubmit={handleCreateTask}>
+                  <input
+                    type="text"
+                    className="task-input"
+                    placeholder="Create new task..."
+                    value={newTaskTitle}
+                    onChange={(e) => {
+                      setNewTaskTitle(e.target.value)
+                      if (validationError) setValidationError(null)
+                    }}
+                    aria-label="New task title"
+                  />
+                  <select
+                    className="task-input"
+                    style={{ width: 'auto', cursor: 'pointer' }}
+                    value={newTaskPriority}
+                    onChange={(e) => setNewTaskPriority(e.target.value)}
+                    aria-label="New task priority"
+                  >
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                  <select
+                    className="task-input"
+                    style={{ width: 'auto', cursor: 'pointer' }}
+                    value={newTaskStatus}
+                    onChange={(e) => setNewTaskStatus(e.target.value)}
+                    aria-label="New task status"
+                  >
+                    <option value="todo">Todo</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="done">Done</option>
+                  </select>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{ padding: '0.65rem 1rem' }}
+                    disabled={taskSubmitting}
+                  >
+                    {taskSubmitting ? 'Adding...' : 'Add'}
+                  </button>
+                </form>
+
+                {/* Validation / Form Error */}
+                {validationError && (
+                  <div className="error-banner" role="alert">
+                    {validationError}
                   </div>
-                ))
-              )}
-            </div>
+                )}
+
+                {/* Tasks Network / Server Error */}
+                {tasksError && (
+                  <div className="error-banner" role="alert">
+                    {tasksError}
+                  </div>
+                )}
+
+                {/* Tasks List */}
+                <div className="task-list">
+                  {tasksLoading && (
+                    <div className="task-empty-state" data-testid="tasks-loading">
+                      Loading tasks...
+                    </div>
+                  )}
+
+                  {!tasksLoading && tasks.length === 0 && (
+                    <div className="task-empty-state" data-testid="task-empty-state">
+                      No tasks found.
+                    </div>
+                  )}
+
+                  {!tasksLoading &&
+                    tasks.map((task) =>
+                      editingTaskId === task.id ? (
+                        <form
+                          key={task.id}
+                          className="task-edit-form"
+                          onSubmit={(e) => handleSaveEdit(e, task.id)}
+                        >
+                          <input
+                            type="text"
+                            className="task-input"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            aria-label={`Edit title for ${task.title}`}
+                          />
+                          <select
+                            className="task-input"
+                            style={{ width: 'auto' }}
+                            value={editPriority}
+                            onChange={(e) => setEditPriority(e.target.value)}
+                            aria-label="Edit priority"
+                          >
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                          </select>
+                          <select
+                            className="task-input"
+                            style={{ width: 'auto' }}
+                            value={editStatus}
+                            onChange={(e) => setEditStatus(e.target.value)}
+                            aria-label="Edit status"
+                          >
+                            <option value="todo">Todo</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="done">Done</option>
+                          </select>
+                          <button
+                            type="submit"
+                            className="btn btn-primary"
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                            onClick={cancelEdit}
+                          >
+                            Cancel
+                          </button>
+                        </form>
+                      ) : (
+                        <div key={task.id} className="task-item">
+                          <div className="task-left">
+                            <input
+                              type="checkbox"
+                              className="task-checkbox"
+                              checked={task.status === 'done'}
+                              onChange={() => handleToggleTaskStatus(task)}
+                              aria-label={`Toggle ${task.title}`}
+                            />
+                            <div>
+                              <span className={`task-title ${task.status === 'done' ? 'done' : ''}`}>
+                                {task.title}
+                              </span>
+                              {task.description && (
+                                <p className="project-item-desc" style={{ marginTop: '0.15rem' }}>
+                                  {task.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <select
+                              className="status-select"
+                              value={task.status}
+                              onChange={(e) => handleChangeStatus(task.id, e.target.value)}
+                              aria-label={`Change status for ${task.title}`}
+                            >
+                              <option value="todo">Todo</option>
+                              <option value="in_progress">In Progress</option>
+                              <option value="done">Done</option>
+                            </select>
+                            <span className={`priority-tag priority-${task.priority}`}>
+                              {task.priority}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                              onClick={() => startEdit(task)}
+                              aria-label={`Edit ${task.title}`}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="delete-btn"
+                              onClick={() => handleDeleteTask(task.id)}
+                              title="Delete task"
+                              aria-label={`Delete ${task.title}`}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    )}
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -326,7 +706,7 @@ function App() {
           <span className="tech-badge">Alembic 1.20</span>
           <span className="tech-badge">React 19</span>
           <span className="tech-badge">Vite 8</span>
-          <span className="tech-badge">SQLite</span>
+          <span className="tech-badge">PostgreSQL</span>
           <span className="tech-badge">Docker Compose</span>
         </footer>
       </main>

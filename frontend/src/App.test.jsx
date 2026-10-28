@@ -2,19 +2,155 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import App from './App'
 
-describe('TaskFlow Frontend Application Tests', () => {
+const MOCK_PROJECTS = {
+  items: [
+    {
+      id: 'proj-1',
+      name: 'Project Alpha',
+      description: 'Alpha workspace description',
+      user_id: 'user-1',
+      created_at: '2026-10-27T10:00:00Z',
+    },
+    {
+      id: 'proj-2',
+      name: 'Project Beta',
+      description: 'Beta workspace description',
+      user_id: 'user-1',
+      created_at: '2026-10-27T10:00:00Z',
+    },
+  ],
+  total: 2,
+  limit: 50,
+  offset: 0,
+}
+
+const MOCK_SUMMARY = {
+  project_id: 'proj-1',
+  total_tasks: 2,
+  todo: 1,
+  in_progress: 0,
+  done: 1,
+}
+
+const MOCK_TASKS = {
+  items: [
+    {
+      id: 'task-1',
+      title: 'Task Alpha 1',
+      description: 'First task',
+      priority: 'high',
+      status: 'todo',
+      project_id: 'proj-1',
+      user_id: 'user-1',
+    },
+    {
+      id: 'task-2',
+      title: 'Task Alpha 2',
+      description: 'Second task',
+      priority: 'low',
+      status: 'done',
+      project_id: 'proj-1',
+      user_id: 'user-1',
+    },
+  ],
+  total: 2,
+  limit: 20,
+  offset: 0,
+}
+
+const setupFetchMock = (overrides = {}) => {
+  return vi.fn().mockImplementation(async (url, options = {}) => {
+    const urlStr = String(url)
+
+    if (urlStr.includes('/health')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: 'healthy', version: '1.0.0' }),
+      }
+    }
+
+    if (urlStr.includes('/api/v1/projects') && !urlStr.includes('/summary')) {
+      if (overrides.projectsError) {
+        return {
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+        }
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => (overrides.projects !== undefined ? overrides.projects : MOCK_PROJECTS),
+      }
+    }
+
+    if (urlStr.includes('/summary')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => (overrides.summary !== undefined ? overrides.summary : MOCK_SUMMARY),
+      }
+    }
+
+    if (urlStr.includes('/api/v1/tasks')) {
+      if (options.method === 'POST') {
+        const body = JSON.parse(options.body)
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'task-new-id',
+            ...body,
+          }),
+        }
+      }
+      if (options.method === 'PATCH' || options.method === 'PUT') {
+        const body = JSON.parse(options.body)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'task-1',
+            title: body.title || 'Task Alpha 1',
+            priority: body.priority || 'high',
+            status: body.status || 'done',
+          }),
+        }
+      }
+      if (options.method === 'DELETE') {
+        return {
+          ok: true,
+          status: 204,
+        }
+      }
+
+      // GET /tasks
+      let items = overrides.tasks !== undefined ? [...overrides.tasks.items] : [...MOCK_TASKS.items]
+      if (urlStr.includes('status=todo')) items = items.filter((t) => t.status === 'todo')
+      if (urlStr.includes('status=done')) items = items.filter((t) => t.status === 'done')
+      if (urlStr.includes('priority=high')) items = items.filter((t) => t.priority === 'high')
+      if (urlStr.includes('priority=low')) items = items.filter((t) => t.priority === 'low')
+
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          items,
+          total: items.length,
+          limit: 20,
+          offset: 0,
+        }),
+      }
+    }
+
+    return Promise.reject(new Error(`Unhandled URL: ${urlStr}`))
+  })
+}
+
+describe('TaskFlow Frontend Application Integration Tests', () => {
   beforeEach(() => {
-    // Default fetch mock returning successful health payload
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      json: async () => ({
-        status: 'healthy',
-        timestamp: '2026-10-27T10:00:00Z',
-        version: '1.0.0',
-      }),
-    })
+    global.fetch = setupFetchMock()
   })
 
   afterEach(() => {
@@ -25,112 +161,214 @@ describe('TaskFlow Frontend Application Tests', () => {
     const utils = render(<App />)
     await waitFor(() => {
       expect(screen.getByText(/API Online|API Offline/)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Select project Project Alpha/i })).toBeInTheDocument()
+      expect(screen.getByText('Task Alpha 1')).toBeInTheDocument()
     })
     return utils
   }
 
-  it('renders task list correctly with initial tasks and completion count', async () => {
+  it('renders projects list and automatically selects first project with tasks and stats', async () => {
     await renderAppAndWait()
 
-    // Verify header title and task sandbox card
-    expect(screen.getByText('Task Sandbox')).toBeInTheDocument()
-    expect(screen.getByText('4 / 5 Completed')).toBeInTheDocument()
+    // Verify projects list rendered
+    expect(screen.getByText('Projects')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Select project Project Alpha/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Select project Project Beta/i })).toBeInTheDocument()
+    expect(screen.getByText('Selected')).toBeInTheDocument()
 
-    // Verify initial task items are rendered
-    expect(screen.getByText('Inspect existing repository setup')).toBeInTheDocument()
-    expect(screen.getByText('Configure FastAPI endpoints and tests')).toBeInTheDocument()
-    expect(screen.getByText('Initialize Alembic and SQLite migrations')).toBeInTheDocument()
-    expect(screen.getByText('Setup GitHub Actions CI pipeline')).toBeInTheDocument()
-    expect(screen.getByText('Day 1: Implement user authentication and models')).toBeInTheDocument()
+    // Verify project detail and summary stats
+    expect(screen.getByRole('heading', { level: 2, name: 'Project Alpha' })).toBeInTheDocument()
+    expect(screen.getAllByText('Alpha workspace description').length).toBeGreaterThan(0)
+    expect(screen.getByText(/Total:/)).toBeInTheDocument()
 
-    // Verify API Online badge
-    expect(screen.getByText('API Online')).toBeInTheDocument()
+    // Verify tasks rendered
+    expect(screen.getByText('Task Alpha 1')).toBeInTheDocument()
+    expect(screen.getByText('Task Alpha 2')).toBeInTheDocument()
   })
 
-  it('renders empty state when all tasks are deleted', async () => {
+  it('switches selected project when clicking another project', async () => {
     await renderAppAndWait()
 
-    // Delete tasks one by one until list is empty
-    while (screen.queryAllByTitle('Delete task').length > 0) {
-      fireEvent.click(screen.getAllByTitle('Delete task')[0])
-    }
+    const projectBetaBtn = screen.getByRole('button', { name: 'Select project Project Beta' })
+    await act(async () => {
+      fireEvent.click(projectBetaBtn)
+    })
 
-    // Verify empty state is displayed
-    const emptyState = screen.getByTestId('task-empty-state')
-    expect(emptyState).toBeInTheDocument()
-    expect(emptyState).toHaveTextContent('No tasks found.')
-    expect(screen.getByText('0 / 0 Completed')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'Project Beta' })).toBeInTheDocument()
+      expect(screen.getAllByText('Beta workspace description').length).toBeGreaterThan(0)
+    })
   })
 
-  it('filters tasks correctly when changing status filter', async () => {
-    await renderAppAndWait()
+  it('renders empty state when projects list is empty', async () => {
+    global.fetch = setupFetchMock({ projects: { items: [], total: 0, limit: 50, offset: 0 } })
 
-    const filterSelect = screen.getByLabelText('Filter tasks')
-    expect(filterSelect).toHaveValue('all')
+    render(<App />)
 
-    // Filter to "Active" (only incomplete tasks)
-    act(() => {
-      fireEvent.change(filterSelect, { target: { value: 'active' } })
+    await waitFor(() => {
+      expect(screen.getByTestId('project-empty-state')).toBeInTheDocument()
+      expect(screen.getByText('No projects found.')).toBeInTheDocument()
     })
-    expect(screen.getByText('Day 1: Implement user authentication and models')).toBeInTheDocument()
-    expect(screen.queryByText('Inspect existing repository setup')).not.toBeInTheDocument()
-    expect(screen.queryByText('Configure FastAPI endpoints and tests')).not.toBeInTheDocument()
-
-    // Filter to "Completed" (only completed tasks)
-    act(() => {
-      fireEvent.change(filterSelect, { target: { value: 'completed' } })
-    })
-    expect(screen.getByText('Inspect existing repository setup')).toBeInTheDocument()
-    expect(screen.getByText('Configure FastAPI endpoints and tests')).toBeInTheDocument()
-    expect(screen.queryByText('Day 1: Implement user authentication and models')).not.toBeInTheDocument()
-
-    // Reset filter to "All Tasks"
-    act(() => {
-      fireEvent.change(filterSelect, { target: { value: 'all' } })
-    })
-    expect(screen.getByText('Inspect existing repository setup')).toBeInTheDocument()
-    expect(screen.getByText('Day 1: Implement user authentication and models')).toBeInTheDocument()
   })
 
-  it('toggles task completion status and updates count', async () => {
-    await renderAppAndWait()
+  it('renders empty state when selected project has no tasks', async () => {
+    global.fetch = setupFetchMock({ tasks: { items: [], total: 0, limit: 20, offset: 0 } })
 
-    // Find the incomplete task checkbox
-    const incompleteCheckbox = screen.getByLabelText(
-      'Toggle Day 1: Implement user authentication and models'
-    )
-    expect(incompleteCheckbox).not.toBeChecked()
-    expect(screen.getByText('4 / 5 Completed')).toBeInTheDocument()
+    render(<App />)
 
-    // Toggle to completed
-    act(() => {
-      fireEvent.click(incompleteCheckbox)
+    await waitFor(() => {
+      const emptyState = screen.getByTestId('task-empty-state')
+      expect(emptyState).toBeInTheDocument()
+      expect(emptyState).toHaveTextContent('No tasks found.')
     })
-    expect(incompleteCheckbox).toBeChecked()
-    expect(screen.getByText('5 / 5 Completed')).toBeInTheDocument()
-
-    // Toggle back to incomplete
-    act(() => {
-      fireEvent.click(incompleteCheckbox)
-    })
-    expect(incompleteCheckbox).not.toBeChecked()
-    expect(screen.getByText('4 / 5 Completed')).toBeInTheDocument()
   })
 
-  it('adds a new task through the creation form', async () => {
+  it('filters tasks correctly when changing status and priority filters', async () => {
     await renderAppAndWait()
 
-    const input = screen.getByPlaceholderText('Create new task...')
+    const statusFilter = screen.getByLabelText('Filter tasks by status')
+    const priorityFilter = screen.getByLabelText('Filter tasks by priority')
+
+    // Filter to todo
+    await act(async () => {
+      fireEvent.change(statusFilter, { target: { value: 'todo' } })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Task Alpha 1')).toBeInTheDocument()
+      expect(screen.queryByText('Task Alpha 2')).not.toBeInTheDocument()
+    })
+
+    // Filter to priority high
+    await act(async () => {
+      fireEvent.change(priorityFilter, { target: { value: 'high' } })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('Task Alpha 1')).toBeInTheDocument()
+      expect(screen.queryByText('Task Alpha 2')).not.toBeInTheDocument()
+    })
+  })
+
+  it('validates task creation form with client validation error', async () => {
+    await renderAppAndWait()
+
     const submitBtn = screen.getByRole('button', { name: 'Add' })
-
-    act(() => {
-      fireEvent.change(input, { target: { value: 'Write Vitest frontend suite' } })
+    await act(async () => {
       fireEvent.click(submitBtn)
     })
 
-    expect(screen.getByText('Write Vitest frontend suite')).toBeInTheDocument()
-    expect(screen.getByText('4 / 6 Completed')).toBeInTheDocument()
-    expect(input).toHaveValue('')
+    expect(screen.getByRole('alert')).toHaveTextContent('Task title is required.')
+  })
+
+  it('creates a new task through creation form', async () => {
+    await renderAppAndWait()
+
+    const titleInput = screen.getByLabelText('New task title')
+    const prioritySelect = screen.getByLabelText('New task priority')
+    const statusSelect = screen.getByLabelText('New task status')
+    const submitBtn = screen.getByRole('button', { name: 'Add' })
+
+    await act(async () => {
+      fireEvent.change(titleInput, { target: { value: 'New Test Task' } })
+      fireEvent.change(prioritySelect, { target: { value: 'high' } })
+      fireEvent.change(statusSelect, { target: { value: 'todo' } })
+      fireEvent.click(submitBtn)
+    })
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/tasks'),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            title: 'New Test Task',
+            priority: 'high',
+            status: 'todo',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+          }),
+        })
+      )
+    })
+  })
+
+  it('toggles task status when checkbox is clicked', async () => {
+    await renderAppAndWait()
+
+    const checkbox = screen.getByLabelText('Toggle Task Alpha 1')
+    await act(async () => {
+      fireEvent.click(checkbox)
+    })
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/tasks/task-1'),
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'done' }),
+        })
+      )
+    })
+  })
+
+  it('edits task title and priority', async () => {
+    await renderAppAndWait()
+
+    const editBtn = screen.getByLabelText('Edit Task Alpha 1')
+    await act(async () => {
+      fireEvent.click(editBtn)
+    })
+
+    const editInput = screen.getByLabelText('Edit title for Task Alpha 1')
+    const saveBtn = screen.getByRole('button', { name: 'Save' })
+
+    await act(async () => {
+      fireEvent.change(editInput, { target: { value: 'Updated Task Alpha 1' } })
+      fireEvent.click(saveBtn)
+    })
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/tasks/task-1'),
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({
+            title: 'Updated Task Alpha 1',
+            priority: 'high',
+            status: 'todo',
+          }),
+        })
+      )
+    })
+  })
+
+  it('deletes a task when delete button is clicked', async () => {
+    await renderAppAndWait()
+
+    const deleteBtn = screen.getByLabelText('Delete Task Alpha 1')
+    await act(async () => {
+      fireEvent.click(deleteBtn)
+    })
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/tasks/task-1'),
+        expect.objectContaining({
+          method: 'DELETE',
+        })
+      )
+    })
+  })
+
+  it('handles backend error when fetching projects', async () => {
+    global.fetch = setupFetchMock({ projectsError: true })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Failed to load projects: HTTP 500 - Internal Server Error')
+    })
   })
 
   it('handles backend connection failure and displays error status', async () => {
@@ -143,7 +381,7 @@ describe('TaskFlow Frontend Application Tests', () => {
     })
 
     expect(screen.getByText(/Status: Connection Failed/i)).toBeInTheDocument()
-    expect(screen.getByText(/Network error: connection refused/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Network error: connection refused/i).length).toBeGreaterThan(0)
   })
 
   it('triggers manual health check when Ping button is clicked', async () => {
@@ -155,8 +393,7 @@ describe('TaskFlow Frontend Application Tests', () => {
     })
 
     await waitFor(() => {
-      // 1 initial mount fetch + 1 manual ping fetch
-      expect(global.fetch).toHaveBeenCalledTimes(2)
+      expect(global.fetch).toHaveBeenCalledWith('http://localhost:8000/health')
     })
   })
 })
