@@ -57,6 +57,12 @@
 - Built 13 React Testing Library integration tests verifying project listing, project switching, task empty states, filter controls, form validation errors, task creation, status toggling, inline editing, task deletion, and network failure states.
 - Replaced ambiguous text queries with accessible role-based queries (`getByRole`), ensuring deterministic test execution.
 
+### E. Documentation, Architecture Alignment & Self-Review (Day 6 Chunk 3)
+- **README.md Overhaul**: Documented project overview, technology stack, system interface overview with screenshot asset (`frontend/src/assets/hero.png`), quick start setup, comprehensive environment variables reference table, testing commands, Docker Compose multi-service startup, and known limitations.
+- **Architecture Documentation (`docs/architecture.md`)**: Updated C4 context and container diagrams to accurately model PostgreSQL 16, Redis Cache-Aside with 60s TTL, Alembic migration container, Nginx SPA container, and domain state machines. Added Type-Safe Configuration pattern.
+- **REST API Contract (`docs/api.md`)**: Aligned endpoint specifications with the live backend, adding the `/ready` database connectivity probe, nested project task creation (`POST /api/v1/projects/{project_id}/tasks`), and RFC 9457 Problem Details error examples (including 400 Bad Request for invalid lifecycle transitions and 404 for non-existent UUIDs).
+- **Quality Assurance**: Executed full test and lint pipelines across backend and frontend, validating 100% pass rates without regression.
+
 ---
 
 ## 3. Key Learnings & Takeaways

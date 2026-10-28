@@ -467,21 +467,36 @@ TaskFlow adheres to the **RFC 9457 standard** (`application/problem+json`) for a
 ```
 
 ### 5.1 Example: 404 Resource Not Found
-Returned when the requested task ID does not exist or does not belong to the user.
+Returned when the requested task or project ID does not exist in the database.
 
 ```json
 {
   "type": "https://taskflow.dev/errors/not-found",
   "title": "Resource Not Found",
   "status": 404,
-  "detail": "Task with ID 99 was not found or does not belong to you",
-  "instance": "/api/v1/tasks/99"
+  "detail": "Task with ID '3fa85f64-5717-4562-b3fc-2c963f66afa6' was not found.",
+  "instance": "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
 }
 ```
 
 ---
 
-### 5.2 Example: 401 Unauthorized
+### 5.2 Example: 400 Bad Request (Invalid Status Transition)
+Returned when attempting an illegal task status transition in violation of the domain state machine (`todo <-> in_progress <-> done`).
+
+```json
+{
+  "type": "https://taskflow.dev/errors/invalid-transition",
+  "title": "Invalid Status Transition",
+  "status": 400,
+  "detail": "Cannot transition task status from 'done' to 'archived'.",
+  "instance": "/api/v1/tasks/3fa85f64-5717-4562-b3fc-2c963f66afa6"
+}
+```
+
+---
+
+### 5.3 Example: 401 Unauthorized
 Returned when a request is missing an `Authorization` header or presents an expired/invalid JWT.
 
 ```json
@@ -496,7 +511,7 @@ Returned when a request is missing an `Authorization` header or presents an expi
 
 ---
 
-### 5.3 Example: 422 Unprocessable Content (Validation Error)
+### 5.4 Example: 422 Unprocessable Content (Validation Error)
 Returned when request parameters or payload fail Pydantic schema validation.
 
 ```json

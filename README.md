@@ -108,6 +108,25 @@ cp .env.example .env
 
 Review `.env` variables if you wish to adjust database ports or CORS origins. The defaults work out of the box with local SQLite and Vite.
 
+#### Environment Variables Reference
+
+| Variable | Default Value | Scope | Description |
+| :--- | :--- | :--- | :--- |
+| `APP_NAME` | `TaskFlow` | Backend | Application and service display name |
+| `APP_ENV` | `development` | Backend | Deployment environment (`development`, `staging`, `production`) |
+| `DEBUG` | `False` | Backend | Verbose debug and error stack traces |
+| `HOST` | `0.0.0.0` | Backend | Server bind IP address |
+| `PORT` | `8000` | Backend | Server bind port |
+| `DATABASE_URL` | `sqlite:///./taskflow.db` | Backend | SQLAlchemy database URL (SQLite local, PostgreSQL in Docker) |
+| `REDIS_URL` | `redis://localhost:6379/0` | Backend | Redis connection URL for summary caching & rate limiting |
+| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Backend | Comma-separated allowed HTTP origins for browser CORS |
+| `TRUSTED_PROXIES` | `127.0.0.1,::1,localhost,testclient` | Backend | Comma-separated trusted reverse proxy IPs for client IP resolution |
+| `LOG_LEVEL` | `INFO` | Backend | Structured logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `POSTGRES_USER` | `taskflow_user` | Compose | PostgreSQL container root user name |
+| `POSTGRES_PASSWORD` | `taskflow_password` | Compose | PostgreSQL container password |
+| `POSTGRES_DB` | `taskflow_db` | Compose | PostgreSQL container database name |
+| `VITE_API_URL` | `http://localhost:8000` | Frontend | Target backend REST API URL for Vite dev proxy & browser requests |
+
 ---
 
 ### 2. Backend Setup & Run

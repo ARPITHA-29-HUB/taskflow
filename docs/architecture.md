@@ -158,6 +158,7 @@ backend/
 2. **Status Transition State Machine**: Valid status transitions (`todo <-> in_progress <-> done`) are strictly enforced in `TaskService`. Invalid transitions raise domain exceptions mapped to HTTP 400 with RFC 9457 error payloads.
 3. **Cache-Aside Pattern**: Project summaries (`GET /api/v1/projects/{id}/summary`) first query Redis. On cache miss, aggregated counts are computed via database query and cached with a 60-second TTL. Any task mutation within the project automatically evicts the cache entry.
 4. **Structured JSON Logging**: Every incoming request is assigned a UUID `X-Request-ID`. Logs output machine-parseable JSON containing timestamp, level, method, path, status, latency, and client IP.
+5. **Type-Safe Configuration**: Pydantic Settings (`app.config.Settings`) centralizes all environment variables (`DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`, `TRUSTED_PROXIES`, `LOG_LEVEL`), providing fail-fast validation on startup and memoized access via `get_settings()` dependency injection.
 
 ---
 
